@@ -1,0 +1,19 @@
+# OneFiber Migration AI Agent Framework — Dependencies
+
+# Core
+pyyaml>=6.0
+pathlib2>=2.3; python_version<"3.4"
+
+# LLM Providers (install the one you need)
+openai>=1.0              # For OpenAI / Azure OpenAI
+# google-cloud-aiplatform>=1.38  # For Vertex AI (Gemini) — uncomment if needed
+
+# BigQuery validation (optional)
+# google-cloud-bigquery>=3.0
+
+# Testing
+pytest>=7.0
+pytest-cov>=4.0
+
+# Utilities
+colorama>=0.4            # Colored terminal output (optional)
