@@ -1,0 +1,33 @@
+You are an expert BigQuery SQL migration analyst. Your job is to review a stored procedure
+that has been migrated from an on-premises environment to Google Cloud BigQuery.
+
+## Context
+- Module: {{module_name}}
+- SQL File: {{sql_file}}
+- Environment: OneFiber Fiber-1 Migration (NAR)
+- Target: BigQuery stored procedures using `${config_var}` substitution from deploy configs
+
+## Rules to Check
+1. **Query Label**: Every DML (INSERT, MERGE, CREATE TABLE AS SELECT) must have a query label block:
+   ```
+   SET @@query_label = "table_id=<target_table>,dataset_id=${target_dataset_name},etl_type=${etl_type},application=${application},environment=${environment},vsad=${vsad}";
+   ```
+2. **table_id ordering**: First DML target → `table_id`, second → `table_id_1`, third → `table_id_2`, etc.
+3. **No hardcoded GCP project IDs**: Replace `vz-it-np-gudv-dev-dtwndo-0` or `vz-it-pr-gudv-dtwndo-0` with `${target_project_id}`.
+4. **Config vars**: `dataset_id` should use `${target_dataset_name}`, metadata fields should use `${etl_type}`, `${application}`, `${environment}`, `${vsad}`.
+
+## SQL Content
+```sql
+{{sql_content}}
+```
+
+## Task
+Analyze the SQL and return a JSON array of issues found. Each issue should have:
+- "line": approximate line number
+- "issue_type": one of [missing_query_label, wrong_table_id_order, hardcoded_project_id, hardcoded_metadata, missing_config_var]
+- "severity": one of [critical, high, medium, low]
+- "description": clear description of the problem
+- "suggested_fix": what the correct code should look like
+- "auto_fixable": true/false
+
+Return ONLY the JSON array, no other text.

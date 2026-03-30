@@ -1,0 +1,223 @@
+[
+  {
+    "report": {
+      "module_name": "daily_metrics_report",
+      "procedure_name": "sp_onef_daily_metrics_load",
+      "complexity": {
+        "score": 32,
+        "difficulty": "VERY_HIGH",
+        "factors": [
+          "1 cursors",
+          "Dynamic SQL",
+          "1 Oracle (+) joins",
+          "2 exception handlers",
+          "1 OUT parameters"
+        ]
+      },
+      "oracle_functions_converted": 10,
+      "functions_needing_manual_review": [],
+      "has_cursors": true,
+      "has_dynamic_sql": true,
+      "has_sequences": false,
+      "has_oracle_joins": true,
+      "total_dml_operations": 4,
+      "total_tables_referenced": 5,
+      "bq_sql_lines": 101,
+      "files_generated": [
+        "daily_metrics_report/pipelines/src/main/sql/sp_onef_daily_metrics_load.sql",
+        "daily_metrics_report/pipelines/src/main/config/deployprd.cfg",
+        "daily_metrics_report/pipelines/src/main/config/deployuat.cfg",
+        "daily_metrics_report/pipelines/src/main/config/deploydev.cfg",
+        "daily_metrics_report/pipelines/src/main/scripts/run_bq_ddl_deploy.sh",
+        "daily_metrics_report/pipelines/src/main/scripts/run_copy_to_gcs.sh",
+        "daily_metrics_report/dag/python/sp_onef_daily_metrics_load.py",
+        "daily_metrics_report/dag/python/DO_utils.py",
+        "daily_metrics_report/dag/config/sp_onef_daily_metrics_load.yml",
+        "daily_metrics_report/dag/config/base_config.yaml",
+        "daily_metrics_report.conf"
+      ],
+      "review_checklist": [
+        "\u26a0\ufe0f  Review: Dynamic SQL (EXECUTE IMMEDIATE) needs manual conversion",
+        "\u26a0\ufe0f  Review: Cursor 'c_source_data' \u2014 verify FOR...IN conversion",
+        "\u26a0\ufe0f  Review: 1 Oracle (+) joins need ANSI JOIN conversion"
+      ]
+    },
+    "analysis": {
+      "filename": "sp_onef_daily_metrics_load.sql",
+      "procedure_name": "SP_LOAD_DAILY_METRICS",
+      "parameters": [
+        {
+          "name": "p_run_date",
+          "mode": "IN",
+          "oracle_type": "DATE",
+          "bq_type": "DATETIME"
+        },
+        {
+          "name": "p_status",
+          "mode": "OUT",
+          "oracle_type": "VARCHAR2",
+          "bq_type": "STRING"
+        }
+      ],
+      "local_variables": [
+        {
+          "name": "v_row_count",
+          "oracle_type": "NUMBER",
+          "bq_type": "NUMERIC",
+          "default_value": "0"
+        },
+        {
+          "name": "v_err_code",
+          "oracle_type": "NUMBER",
+          "bq_type": "NUMERIC",
+          "default_value": null
+        },
+        {
+          "name": "v_err_msg",
+          "oracle_type": "VARCHAR2(4000)",
+          "bq_type": "STRING",
+          "default_value": null
+        },
+        {
+          "name": "v_start_ts",
+          "oracle_type": "TIMESTAMP",
+          "bq_type": "TIMESTAMP",
+          "default_value": "SYSTIMESTAMP"
+        }
+      ],
+      "cursors": [
+        {
+          "name": "c_source_data",
+          "parameters": null,
+          "query": "SELECT /*+ PARALLEL(4) */\n            a.site_id,\n            a.market_name,\n            NVL(a.vendor_name, 'UNKNOWN') AS vendor_name,\n            DECODE(a.status_code, 'A', 'Active', 'I', 'Inactive', 'Unknown') AS status_desc,\n            TO_CHAR(a.created_date, 'YYYY-MM-DD') AS created_dt,\n            TO_NUMBER(a.cost_amount) AS cost_amt,\n            b.region_name,\n            LISTAGG(c.task_name, ', ') WITHIN GROUP (ORDER BY c.task_seq) AS task_list\n        FROM ONEFIBER_SCHEMA.SITE_MASTER a,\n             ONEFIBER_SCHEMA.REGION_LOOKUP b,\n             ONEFIBER_SCHEMA.TASK_DETAILS c\n        WHERE a.region_id = b.region_id\n          AND a.site_id = c.site_id(+)\n          AND a.created_date >= ADD_MONTHS(SYSDATE, -12)\n        GROUP BY a.site_id, a.market_name, a.vendor_name,\n                 a.status_code, a.created_date, a.cost_amount, b.region_name"
+        }
+      ],
+      "table_references": [
+        "ONEFIBER_SCHEMA.DAILY_METRICS_FINAL",
+        "ONEFIBER_SCHEMA.DAILY_METRICS_STG",
+        "ONEFIBER_SCHEMA.SITE_MASTER",
+        "TABLE",
+        "target"
+      ],
+      "oracle_functions": [
+        {
+          "oracle_function": "SYSDATE",
+          "bq_equivalent": "CURRENT_DATETIME()",
+          "needs_manual_review": false,
+          "occurrences": 3
+        },
+        {
+          "oracle_function": "SYSTIMESTAMP",
+          "bq_equivalent": "CURRENT_TIMESTAMP()",
+          "needs_manual_review": false,
+          "occurrences": 1
+        },
+        {
+          "oracle_function": "NVL",
+          "bq_equivalent": "IFNULL",
+          "needs_manual_review": false,
+          "occurrences": 1
+        },
+        {
+          "oracle_function": "DECODE",
+          "bq_equivalent": "CASE",
+          "needs_manual_review": false,
+          "occurrences": 1
+        },
+        {
+          "oracle_function": "TO_CHAR",
+          "bq_equivalent": "FORMAT_DATETIME",
+          "needs_manual_review": false,
+          "occurrences": 1
+        },
+        {
+          "oracle_function": "TO_NUMBER",
+          "bq_equivalent": "CAST",
+          "needs_manual_review": false,
+          "occurrences": 1
+        },
+        {
+          "oracle_function": "ADD_MONTHS",
+          "bq_equivalent": "DATE_ADD",
+          "needs_manual_review": false,
+          "occurrences": 1
+        },
+        {
+          "oracle_function": "LISTAGG",
+          "bq_equivalent": "STRING_AGG",
+          "needs_manual_review": false,
+          "occurrences": 1
+        },
+        {
+          "oracle_function": "REPLACE",
+          "bq_equivalent": "REPLACE",
+          "needs_manual_review": false,
+          "occurrences": 1
+        },
+        {
+          "oracle_function": "DBMS_OUTPUT.PUT_LINE",
+          "bq_equivalent": "SELECT",
+          "needs_manual_review": false,
+          "occurrences": 3
+        }
+      ],
+      "dml_operations": [
+        {
+          "type": "INSERT",
+          "target": "ONEFIBER_SCHEMA.DAILY_METRICS_STG"
+        },
+        {
+          "type": "MERGE",
+          "target": "target"
+        },
+        {
+          "type": "MERGE",
+          "target": "ONEFIBER_SCHEMA.DAILY_METRICS_FINAL"
+        },
+        {
+          "type": "TRUNCATE",
+          "target": "ONEFIBER_SCHEMA.DAILY_METRICS_STG"
+        }
+      ],
+      "exception_handlers": [
+        {
+          "exception": "MATCHED",
+          "handler_body": "UPDATE SET\n            t.market_name = s.market_name,\n            t.vendor_name = s.vendor_name,\n            t.status_desc = s.status_desc,\n            t.cost_amt = s.cost_amt,\n            t.region_na"
+        },
+        {
+          "exception": "OTHERS",
+          "handler_body": "v_err_code := SQLCODE;\n        v_err_msg := SQLERRM;\n        ROLLBACK;\n        p_status := 'FAILED: ' || v_err_msg;\n        DBMS_OUTPUT.PUT_LINE('Error: ' || v_err_code || ' - ' || v_err_msg);\n       "
+        }
+      ],
+      "oracle_join_syntax": [
+        {
+          "left": "a.site_id",
+          "right": "c.site_id",
+          "line": 25
+        }
+      ],
+      "sequences_used": [],
+      "synonyms_used": [
+        "TABLE",
+        "target"
+      ],
+      "hints_used": [
+        "PARALLEL(4)"
+      ],
+      "has_dynamic_sql": true,
+      "has_autonomous_transaction": false,
+      "has_bulk_operations": false,
+      "complexity_score": {
+        "score": 32,
+        "difficulty": "VERY_HIGH",
+        "factors": [
+          "1 cursors",
+          "Dynamic SQL",
+          "1 Oracle (+) joins",
+          "2 exception handlers",
+          "1 OUT parameters"
+        ]
+      }
+    }
+  }
+]

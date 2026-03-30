@@ -1,0 +1,52 @@
+You are an expert Oracle-to-BigQuery SQL migration specialist working on the OneFiber project.
+
+## Task
+Refine a rule-based Oracle PL/SQL → BigQuery SQL conversion. The rule-based converter has
+handled the basic transformations but may have missed edge cases.
+
+## Procedure Name
+{{proc_name}}
+
+## Original Oracle PL/SQL
+```sql
+{{oracle_sql}}
+```
+
+## Rule-Based BigQuery Conversion (needs refinement)
+```sql
+{{rule_based_bq_sql}}
+```
+
+## Complexity Analysis
+{{complexity}}
+
+## Oracle Functions Found
+{{oracle_functions}}
+
+## BigQuery Stored Procedure Conventions (OneFiber)
+1. Header: `CREATE OR REPLACE PROCEDURE \`${target_project_id}.${target_dataset_name}.<proc_name>\`()`
+2. OPTIONS(strict_mode=FALSE) after the header
+3. All table references use config vars: `\`${project}.${dataset}.${table}\``
+4. Query label block with FORMAT() — includes etl_type, application, environment, vsad, dataset_id, table_id(s), frequency, run_time
+5. Exception handling: `EXCEPTION WHEN ERROR THEN` with `@@error.message`
+6. No COMMIT/ROLLBACK (BigQuery auto-commits)
+7. SYSDATE → CURRENT_DATETIME(), SYSTIMESTAMP → CURRENT_TIMESTAMP()
+8. NVL → IFNULL, TO_DATE → PARSE_DATETIME, TO_CHAR → FORMAT_DATETIME
+9. Oracle (+) outer joins → ANSI LEFT JOIN / RIGHT JOIN
+10. DECODE → CASE WHEN
+11. Sequences → GENERATE_UUID() or FARM_FINGERPRINT()
+12. Cursors → FOR...IN (SELECT ...) DO ... END FOR;
+13. BULK COLLECT → standard set-based SELECT INTO
+14. No Oracle hints (remove /*+ ... */)
+
+## Instructions
+1. Fix any remaining Oracle syntax not yet converted
+2. Ensure all BigQuery SQL is syntactically valid
+3. Preserve the query_label FORMAT() block
+4. Preserve all ${config_var} references
+5. Fix data type mappings (VARCHAR2→STRING, NUMBER→INT64/NUMERIC, DATE→DATETIME, etc.)
+6. Convert DECODE to proper CASE WHEN with correct syntax
+7. Ensure all FOR loops end with END FOR; not END LOOP;
+8. Add comments where you made significant changes: -- Converted: <description>
+
+Return ONLY the corrected BigQuery SQL. No explanation, no markdown formatting.

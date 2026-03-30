@@ -1,0 +1,138 @@
+# Migration AI Agents - Configuration
+# ====================================
+
+# Project Settings
+project:
+  name: "onefiber-migration"
+  repo_root: ".."  # relative to migration_ai_agents/
+  environments:
+    - dev
+    - uat
+    - prod
+
+# GCP Settings
+gcp:
+  dev:
+    project_id: "vz-it-np-gudv-dev-dtwndo-0"
+    composer_project_id: "vz-it-np-wdwg-dev-aidcom-0"
+    dataset: "aid_nar_poc_tbls"
+    ien_src_project_id: "vz-it-pr-i37v-ndldo-0"
+    ien_src_dataset_id: "vzn_ndl_ien_core_tbls_rd_v"
+  uat:
+    project_id: "vz-it-pr-gudv-dtwndo-0"
+    composer_project_id: "vz-it-pr-wdwg-aidcom-0"
+    dataset: "aid_nar_poc_tbls"
+    ien_src_project_id: "vz-it-pr-i37v-ndlpr-0"
+    ien_src_dataset_id: "vzn_ndl_ien_core_tbls"
+  prod:
+    project_id: "vz-it-pr-gudv-dtwndo-0"
+    composer_project_id: "vz-it-pr-wdwg-aidcom-0"
+    dataset: "aid_nar_poc_tbls"
+    ien_src_project_id: "vz-it-pr-i37v-ndlpr-0"
+    ien_src_dataset_id: "vzn_ndl_ien_core_tbls"
+
+# LLM Settings
+llm:
+  provider: "openai"  # openai | vertex_ai | azure_openai
+  model: "gpt-4o"
+  temperature: 0.1
+  max_tokens: 4096
+  # For OpenAI
+  openai:
+    api_key: "${OPENAI_API_KEY}"  # set via env var
+  # For Vertex AI
+  vertex_ai:
+    project_id: ""
+    location: "us-central1"
+    model: "gemini-1.5-pro"
+  # For Azure OpenAI
+  azure_openai:
+    endpoint: ""
+    api_key: "${AZURE_OPENAI_API_KEY}"
+    deployment: "gpt-4o"
+    api_version: "2024-02-01"
+
+# Module Discovery
+modules:
+  # Auto-discover from repo root, or list explicitly
+  auto_discover: true
+  # Pattern: each module has pipelines/src/main/sql/*.sql + config/*.cfg + dag/
+  structure:
+    sql_path: "pipelines/src/main/sql"
+    config_path: "pipelines/src/main/config"
+    dag_python_path: "dag/python"
+    dag_config_path: "dag/config"
+    dag_uat_python_path: "dag/uat/python"
+    dag_uat_config_path: "dag/uat/config"
+    bq_ddl_path: "pipelines/src/main/bq_ddl"
+
+# Validation Settings
+validation:
+  # Compare row counts
+  row_count_check: true
+  # Compare column-level aggregates
+  column_aggregate_check: true
+  # Sample N rows for deep comparison
+  sample_row_count: 1000
+  # Tolerance for numeric comparisons
+  numeric_tolerance: 0.01
+  # Max rows to report in mismatch detail
+  max_mismatch_rows: 50
+
+# Agent Settings
+agents:
+  conversion:
+    # What to convert
+    convert_sql: true
+    convert_dag: true
+    convert_config: true
+    # Source -> Target mapping rules
+    rules:
+      - name: "config_var_substitution"
+        description: "Replace hardcoded values with ${config_var}"
+      - name: "query_label_standardization"
+        description: "Standardize @@query_label blocks"
+      - name: "table_id_ordering"
+        description: "Main table=table_id, additional=table_id_1,2..."
+      - name: "dag_id_naming"
+        description: "Format: gudv_nar_onef_<dashboard_name>"
+      - name: "environment_separation"
+        description: "deployprd=prod, deployuat=uat, deploydev=dev"
+
+  validation:
+    timeout_seconds: 300
+    retry_count: 2
+
+  debug:
+    # Categories of issues to check
+    categories:
+      - "sql_syntax"
+      - "join_mismatch"
+      - "aggregation_mismatch"
+      - "data_type_conversion"
+      - "config_var_missing"
+      - "table_reference_mismatch"
+
+  fix:
+    # Auto-apply fixes or just suggest
+    auto_apply: false
+    # Create backup before fixing
+    create_backup: true
+    backup_suffix: ".bak"
+
+# Output Settings
+output:
+  directory: "output"
+  # Report formats
+  formats:
+    - json
+    - html
+  # Keep history
+  keep_history: true
+  max_history_days: 30
+
+# Logging
+logging:
+  level: "INFO"
+  file: "output/migration_agent.log"
+  format: "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
