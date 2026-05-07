@@ -1,10 +1,15 @@
-"""FastAPI REST API — serves the PHP UI and exposes pipeline control endpoints."""
+"""FastAPI application — multi-tenant SaaS data migration platform.
+
+Preserves all original SQL-Gen pipeline endpoints (prefixed /api/pipeline, /api/jira, etc.)
+and adds the new multi-tenant auth, pipeline orchestration, and gate routers.
+"""
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -16,11 +21,64 @@ from pydantic import BaseModel
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
 
+# ── Original core imports (preserved) ────────────────────────────────────────
 from core import state_db
-from core.orchestrator import PipelineOrchestrator
+from core.orchestrator import PipelineOrchestrator as LegacyOrchestrator
 
-app = FastAPI(title="SQL-Gen Agentic Pipeline", version="2.0.0")
+# ── New multi-tenant imports ──────────────────────────────────────────────────
+from core.db.platform import close_engine, get_engine
+from core.models.platform import PlatformBase
+from core.tenant.middleware import TenantMiddleware
+from routers.auth import router as auth_router
+from routers.pipeline import router as pipeline_router
+from routers.gates import router as gates_router
+
+
+# ── Startup / Shutdown ────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Create platform DB tables on startup; dispose engine on shutdown."""
+    try:
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.run_sync(PlatformBase.metadata.create_all)
+        logger.info("Platform DB tables ready")
+    except Exception as exc:
+        logger.warning("Could not connect to platform DB on startup: %s", exc)
+
+    # Startup recovery: resume any 'running' runs that were interrupted
+    try:
+        _recover_stale_runs()
+    except Exception as exc:
+        logger.warning("Startup recovery skipped: %s", exc)
+
+    yield
+
+    await close_engine()
+    logger.info("Platform DB engine closed")
+
+
+def _recover_stale_runs() -> None:
+    """Mark any legacy runs stuck in 'running' as 'failed' after restart."""
+    try:
+        stale = state_db.get_stale_running_runs()
+        for run in stale:
+            state_db.mark_run_failed(run["run_id"], "Interrupted by server restart")
+            logger.warning("Recovered stale run: %s", run["run_id"])
+    except AttributeError:
+        pass  # state_db may not implement get_stale_running_runs
+
+
+# ── App factory ───────────────────────────────────────────────────────────────
+
+app = FastAPI(
+    title="SQL-Gen / Migration Platform",
+    version="2.0.0",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,17 +87,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_orchestrator: Optional[PipelineOrchestrator] = None
+app.add_middleware(TenantMiddleware)
+
+# ── New routers ───────────────────────────────────────────────────────────────
+app.include_router(auth_router)
+app.include_router(pipeline_router)
+app.include_router(gates_router)
 
 
-def get_orchestrator() -> PipelineOrchestrator:
+# ── Legacy orchestrator singleton ─────────────────────────────────────────────
+
+_orchestrator: Optional[LegacyOrchestrator] = None
+
+
+def get_orchestrator() -> LegacyOrchestrator:
     global _orchestrator
     if _orchestrator is None:
-        _orchestrator = PipelineOrchestrator()
+        _orchestrator = LegacyOrchestrator()
     return _orchestrator
 
 
-# ── Request / Response models ─────────────────────────────────────────────────
+# ── Health ────────────────────────────────────────────────────────────────────
+
+@app.get("/health")
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "version": "2.0.0"}
+
+
+# ── Legacy Request / Response models ──────────────────────────────────────────
 
 class TriggerRequest(BaseModel):
     raw_input:      Optional[str] = None
@@ -53,12 +129,7 @@ class ApprovalRequest(BaseModel):
     notes:    str = ""
 
 
-# ── Pipeline endpoints ────────────────────────────────────────────────────────
-
-@app.get("/api/health")
-def health():
-    return {"status": "ok", "version": "2.0.0"}
-
+# ── Legacy pipeline endpoints (preserved) ─────────────────────────────────────
 
 @app.post("/api/pipeline/trigger")
 def trigger_pipeline(req: TriggerRequest):
@@ -120,7 +191,7 @@ async def stream_run(run_id: str):
     """Server-Sent Events for real-time pipeline status updates."""
     async def event_generator():
         last_log_count = 0
-        for _ in range(300):   # 5 min timeout
+        for _ in range(300):
             row = state_db.get_run(run_id)
             if not row:
                 yield "data: {\"error\": \"run not found\"}\n\n"
@@ -153,7 +224,6 @@ def list_mappings(limit: int = 30):
 
 @app.get("/api/mappings/{mapping_id}/svg")
 def get_mapping_svg(mapping_id: str):
-    """Serve the SVG workflow diagram for a mapping."""
     svg_path = Path("output/diagrams") / f"{mapping_id}.svg"
     if not svg_path.exists():
         raise HTTPException(404, f"SVG not found for mapping {mapping_id}")
