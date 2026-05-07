@@ -1,0 +1,28 @@
+# LLM
+anthropic>=0.40.0
+
+# Google Cloud
+google-cloud-bigquery>=3.19.0
+google-cloud-logging>=3.10.0
+
+# Atlassian / Jira
+jira>=3.8.0
+requests>=2.31.0
+
+# GitHub
+PyGithub>=2.3.0
+
+# Web framework (API service)
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+
+# Data validation
+pydantic>=2.7.0
+
+# Config
+python-dotenv>=1.0.0
+
+# Tests
+pytest>=8.2.0
+pytest-asyncio>=0.23.0
+httpx>=0.27.0

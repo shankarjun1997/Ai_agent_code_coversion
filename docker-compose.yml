@@ -1,0 +1,52 @@
+services:
+
+  # ── Python FastAPI — pipeline orchestrator ────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: sqlgen-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - output_data:/app/output
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - sqlgen-net
+
+  # ── PHP + Nginx — dashboard UI ───────────────────────────────────────────
+  ui:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ui
+    container_name: sqlgen-ui
+    restart: unless-stopped
+    environment:
+      - API_BASE_URL=http://api:8000
+    volumes:
+      - output_data:/app/output:ro   # read-only — UI only reads state
+      - ./ui:/var/www/html           # live-reload for UI development
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - sqlgen-net
+
+volumes:
+  output_data:
+    driver: local
+
+networks:
+  sqlgen-net:
+    driver: bridge

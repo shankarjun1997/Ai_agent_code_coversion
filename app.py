@@ -1,0 +1,187 @@
+"""FastAPI REST API — serves the PHP UI and exposes pipeline control endpoints."""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+from pydantic import BaseModel
+
+load_dotenv()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+
+from core import state_db
+from core.orchestrator import PipelineOrchestrator
+
+app = FastAPI(title="SQL-Gen Agentic Pipeline", version="2.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+_orchestrator: Optional[PipelineOrchestrator] = None
+
+
+def get_orchestrator() -> PipelineOrchestrator:
+    global _orchestrator
+    if _orchestrator is None:
+        _orchestrator = PipelineOrchestrator()
+    return _orchestrator
+
+
+# ── Request / Response models ─────────────────────────────────────────────────
+
+class TriggerRequest(BaseModel):
+    raw_input:      Optional[str] = None
+    jira_issue_key: Optional[str] = None
+    legacy_code:    Optional[str] = None
+    legacy_dialect: Optional[str] = None
+
+
+class ApprovalRequest(BaseModel):
+    reviewer: str
+    notes:    str = ""
+
+
+# ── Pipeline endpoints ────────────────────────────────────────────────────────
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "version": "2.0.0"}
+
+
+@app.post("/api/pipeline/trigger")
+def trigger_pipeline(req: TriggerRequest):
+    if not req.raw_input and not req.jira_issue_key:
+        raise HTTPException(400, "Provide raw_input or jira_issue_key")
+    orch = get_orchestrator()
+    run  = orch.trigger(
+        raw_input=req.raw_input or "",
+        jira_issue_key=req.jira_issue_key,
+        legacy_code=req.legacy_code,
+        legacy_dialect=req.legacy_dialect,
+    )
+    return {"run_id": run.run_id, "jira_issue": run.jira_issue, "status": run.status}
+
+
+@app.post("/api/pipeline/runs/{run_id}/approve")
+def approve_run(run_id: str, req: ApprovalRequest):
+    orch = get_orchestrator()
+    ok   = orch.approve(run_id, req.reviewer, req.notes)
+    if not ok:
+        raise HTTPException(404, "Run not found or not in review state")
+    return {"ok": True}
+
+
+@app.post("/api/pipeline/runs/{run_id}/reject")
+def reject_run(run_id: str, req: ApprovalRequest):
+    orch = get_orchestrator()
+    ok   = orch.reject(run_id, req.reviewer, req.notes)
+    if not ok:
+        raise HTTPException(404, "Run not found or not in review state")
+    return {"ok": True}
+
+
+@app.get("/api/pipeline/runs")
+def list_runs(limit: int = 30):
+    return state_db.get_recent_runs(limit)
+
+
+@app.get("/api/pipeline/runs/pending")
+def pending_reviews():
+    return state_db.get_pending_reviews()
+
+
+@app.get("/api/pipeline/runs/{run_id}")
+def get_run(run_id: str):
+    row = state_db.get_run(run_id)
+    if not row:
+        raise HTTPException(404, "Run not found")
+    return row
+
+
+@app.get("/api/pipeline/runs/{run_id}/artifacts")
+def get_artifacts(run_id: str):
+    return state_db.get_run_artifacts(run_id)
+
+
+@app.get("/api/pipeline/runs/{run_id}/stream")
+async def stream_run(run_id: str):
+    """Server-Sent Events for real-time pipeline status updates."""
+    async def event_generator():
+        last_log_count = 0
+        for _ in range(300):   # 5 min timeout
+            row = state_db.get_run(run_id)
+            if not row:
+                yield "data: {\"error\": \"run not found\"}\n\n"
+                return
+
+            logs: List[str] = json.loads(row.get("log_json") or "[]")
+            new_logs = logs[last_log_count:]
+            last_log_count = len(logs)
+
+            for log in new_logs:
+                yield f"data: {json.dumps({'type': 'log', 'message': log})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'status', 'stage': row['stage'], 'status': row['status']})}\n\n"
+
+            if row["status"] in ("completed", "failed"):
+                yield f"data: {json.dumps({'type': 'done', 'status': row['status']})}\n\n"
+                return
+
+            await asyncio.sleep(2)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+# ── Mappings ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/mappings")
+def list_mappings(limit: int = 30):
+    return state_db.get_recent_mappings(limit)
+
+
+@app.get("/api/mappings/{mapping_id}/svg")
+def get_mapping_svg(mapping_id: str):
+    """Serve the SVG workflow diagram for a mapping."""
+    svg_path = Path("output/diagrams") / f"{mapping_id}.svg"
+    if not svg_path.exists():
+        raise HTTPException(404, f"SVG not found for mapping {mapping_id}")
+    return FileResponse(str(svg_path), media_type="image/svg+xml")
+
+
+# ── Jira proxy ────────────────────────────────────────────────────────────────
+
+@app.get("/api/jira/issues")
+def search_jira(jql: str = "project=DATA ORDER BY created DESC", max_results: int = 50):
+    try:
+        orch   = get_orchestrator()
+        issues = orch.jira.search_issues(jql, max_results)
+        return issues
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/jira/issues/{issue_key}")
+def get_jira_issue(issue_key: str):
+    try:
+        orch  = get_orchestrator()
+        story = orch.jira.get_issue(issue_key, os.getenv("JIRA_AC_FIELD"))
+        return story.model_dump()
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
