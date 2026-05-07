@@ -21,11 +21,14 @@ class PipelineRun(TenantBase):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    pipeline_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    pipeline_name: Mapped[str] = mapped_column(String(255), nullable=False, default="default")
     status: Mapped[str] = mapped_column(
-        String(50), nullable=False, default="pending"
-    )  # pending | running | awaiting_gate | completed | failed
+        String(50), nullable=False, default="PENDING"
+    )
+    current_stage: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    input_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -52,10 +55,14 @@ class GateEvent(TenantBase):
     run_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("pipeline_runs.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    gate_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    decision: Mapped[str] = mapped_column(String(50), nullable=False)  # approved | rejected
+    stage: Mapped[str] = mapped_column(String(50), nullable=False, default="")
+    gate_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="PENDING")
+    decision: Mapped[str] = mapped_column(String(50), nullable=False, default="")
+    reviewer_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     reviewer_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -98,7 +105,9 @@ class GeneratedArtifact(TenantBase):
     run_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("pipeline_runs.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    artifact_type: Mapped[str] = mapped_column(String(100), nullable=False)  # sql | report | etc
+    agent_id: Mapped[str] = mapped_column(String(50), nullable=False, default="")
+    artifact_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    filename: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     content: Mapped[str] = mapped_column(Text, nullable=False)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

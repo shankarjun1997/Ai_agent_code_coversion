@@ -2,18 +2,45 @@
 
 import re
 import uuid
+import base64
+import hashlib
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth.hashing import hash_password
-from core.db.tenant import encrypt_db_url
 from core.models.platform import Tenant, TenantUser
 from core.models.tenant import TenantBase
 
 
 def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def encrypt_db_url(plain_url: str) -> str:
+    from cryptography.fernet import Fernet
+    from core.config import get_settings
+    settings = get_settings()
+    key = base64.b64decode(settings.ENCRYPTION_KEY)
+    fernet = Fernet(base64.urlsafe_b64encode(key[:32]))
+    return fernet.encrypt(plain_url.encode()).decode()
+
+
+def decrypt_db_url(encrypted: str) -> str:
+    from cryptography.fernet import Fernet
+    from core.config import get_settings
+    settings = get_settings()
+    key = base64.b64decode(settings.ENCRYPTION_KEY)
+    fernet = Fernet(base64.urlsafe_b64encode(key[:32]))
+    return fernet.decrypt(encrypted.encode()).decode()
+
+
+def provision_tenant_db(slug: str, platform_db_url: str) -> str:
+    """Derive tenant DB URL from platform URL and slug."""
+    # Replace the last path component (db name) with tenant-specific name
+    if "/" in platform_db_url:
+        base = platform_db_url.rsplit("/", 1)[0]
+        return f"{base}/tenant_{slug}"
+    return platform_db_url
 
 
 async def provision_tenant(

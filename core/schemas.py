@@ -90,9 +90,11 @@ class PrototypeSpec(BaseModel):
 class RequirementsDoc(BaseModel):
     doc_id:               str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
     created_at:           datetime = Field(default_factory=datetime.utcnow)
-    raw_input_summary:    str
-    jira_story_draft:     JiraStory
-    task_breakdown:       List[str]          # ingestion / curation / audit / DQ / observability tasks
+    summary:              str = ""
+    acceptance_criteria:  str = ""
+    raw_input_summary:    str = ""
+    jira_story_draft:     Optional[JiraStory] = None
+    task_breakdown:       List[str] = []     # ingestion / curation / audit / DQ / observability tasks
     clarifying_questions: List[ClarifyingQuestion] = []
     contradictions:       List[str] = []     # detected contradictions + suggestions
     prototype:            Optional[PrototypeSpec] = None

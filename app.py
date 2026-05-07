@@ -28,12 +28,47 @@ from core import state_db
 from core.orchestrator import PipelineOrchestrator as LegacyOrchestrator
 
 # ── New multi-tenant imports ──────────────────────────────────────────────────
-from core.db.platform import close_engine, get_engine
+from core.db.platform import close_engine, get_engine, get_platform_session_factory
+from core.db.tenant import get_tenant_session_factory
 from core.models.platform import PlatformBase
 from core.tenant.middleware import TenantMiddleware
 from routers.auth import router as auth_router
-from routers.pipeline import router as pipeline_router
+from routers.pipelines import router as pipeline_router
 from routers.gates import router as gates_router
+
+
+def decrypt_db_url(encrypted: str) -> str:
+    from core.tenant.provisioner import decrypt_db_url as _decrypt
+    return _decrypt(encrypted)
+
+
+
+
+
+async def recover_awaiting_gates(gate_engine) -> None:
+    """On startup, restore gate events for runs still in AWAITING state."""
+    try:
+        async with get_platform_session_factory()() as platform_db:
+            from sqlalchemy import select
+            from core.models.platform import Tenant
+            result = await platform_db.execute(select(Tenant))
+            tenants = result.scalars().all()
+        for tenant in tenants:
+            try:
+                db_url = decrypt_db_url(tenant.db_url_encrypted)
+                async with get_tenant_session_factory(db_url)() as tenant_db:
+                    from sqlalchemy import select
+                    from core.models.tenant import PipelineRun
+                    result = await tenant_db.execute(
+                        select(PipelineRun).where(PipelineRun.status == "AWAITING")
+                    )
+                    runs = result.scalars().all()
+                for run in runs:
+                    gate_engine.restore_gate(str(run.id))
+            except Exception as exc:
+                logger.warning("Failed to recover gates for tenant %s: %s", tenant.slug, exc)
+    except Exception as exc:
+        logger.warning("recover_awaiting_gates failed: %s", exc)
 
 
 # ── Startup / Shutdown ────────────────────────────────────────────────────────

@@ -54,6 +54,10 @@ async def get_platform_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
+def get_platform_session_factory() -> async_sessionmaker[AsyncSession]:
+    return get_session_factory()
+
+
 async def close_engine() -> None:
     global _engine, _session_factory
     if _engine is not None:

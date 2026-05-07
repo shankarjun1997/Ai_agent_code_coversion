@@ -35,15 +35,34 @@ class PipelineDefinition:
 class PipelineOrchestrator:
     def __init__(
         self,
-        session: AsyncSession,
+        session: AsyncSession | None = None,
         engine: AsyncioEngine | None = None,
+        gate: GateEngine | None = None,
         notifier: SlackNotifier | None = None,
     ):
         self._session = session
         self._engine = engine or AsyncioEngine()
         self._notifier = notifier or SlackNotifier()
-        self._gate_engine = GateEngine(session)
-        self._artifact_store = PostgresArtifactStore(session)
+        self._gate_engine = gate or GateEngine()
+        self._artifact_store = PostgresArtifactStore(session) if session else None
+
+    async def run(self, run_id: str, input_data: dict, db: Any) -> None:
+        """High-level run method: executes all 4 agents with 4 gate checkpoints."""
+        try:
+            await self._engine.run_agent("agent_1", input_data)
+            await self._gate_engine.wait_for_approval(run_id, "agent_1", db)
+            await self._engine.run_agent("agent_2", input_data)
+            await self._gate_engine.wait_for_approval(run_id, "agent_2", db)
+            results = await self._engine.run_agents_parallel([
+                ("agent_3a", input_data), ("agent_3b", input_data),
+                ("agent_3c", input_data), ("agent_3d", input_data),
+                ("agent_3e", input_data),
+            ])
+            await self._gate_engine.wait_for_approval(run_id, "agent_3", db)
+            await self._engine.run_agent("agent_4", input_data)
+            await self._gate_engine.wait_for_approval(run_id, "agent_4", db)
+        except GateRejectedError:
+            await db.execute(f"UPDATE pipeline_runs SET status='FAILED' WHERE id='{run_id}'")
 
     async def start_run(
         self,

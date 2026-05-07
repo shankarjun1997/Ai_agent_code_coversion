@@ -1,57 +1,42 @@
-"""GateEngine — human-in-the-loop approval gates for pipeline runs."""
+"""GateEngine — human-in-the-loop approval gates using asyncio Events."""
 
-import uuid
+import asyncio
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from core.errors import GateRejectedError
-from core.models.tenant import GateEvent, PipelineRun
 
 
 class GateEngine:
-    """
-    Manages gate checkpoints in a pipeline run.
-    Writes GateEvent rows and raises GateRejectedError on rejection.
-    """
+    def __init__(self, slack=None):
+        self._gates: dict[str, asyncio.Event] = {}
+        self._decisions: dict[str, dict] = {}
+        self._slack = slack
 
-    def __init__(self, session: AsyncSession):
-        self._session = session
+    def restore_gate(self, run_id: str) -> None:
+        if run_id not in self._gates:
+            self._gates[run_id] = asyncio.Event()
 
-    async def record_gate(
-        self,
-        run_id: uuid.UUID,
-        gate_name: str,
-        decision: str,  # "approved" | "rejected"
-        reviewer_id: uuid.UUID | None = None,
-        notes: str | None = None,
-    ) -> GateEvent:
-        """Persist a gate decision."""
-        event = GateEvent(
-            id=uuid.uuid4(),
-            run_id=run_id,
-            gate_name=gate_name,
-            decision=decision,
-            reviewer_id=reviewer_id,
-            notes=notes,
-        )
-        self._session.add(event)
-        await self._session.flush()
-        return event
+    async def wait_for_approval(self, run_id: str, stage: str, db: Any = None) -> None:
+        if run_id not in self._gates:
+            self._gates[run_id] = asyncio.Event()
+        event = self._gates[run_id]
+        await event.wait()
+        decision = self._decisions.get(run_id, {})
+        if decision.get("action") == "rejected":
+            raise GateRejectedError(decision.get("notes", ""))
 
-    async def enforce_gate(
-        self,
-        run_id: uuid.UUID,
-        gate_name: str,
-        decision: str,
-        reviewer_id: uuid.UUID | None = None,
-        notes: str | None = None,
-    ) -> GateEvent:
-        """
-        Record gate and raise GateRejectedError if rejected.
-        Call this during pipeline execution at checkpoint boundaries.
-        """
-        event = await self.record_gate(run_id, gate_name, decision, reviewer_id, notes)
-        if decision == "rejected":
-            raise GateRejectedError(notes=notes or "")
-        return event
+    async def approve(self, run_id: str, stage: str, reviewer: str = "", notes: str = "", db: Any = None) -> None:
+        if run_id not in self._gates:
+            self._gates[run_id] = asyncio.Event()
+        self._decisions[run_id] = {"action": "approved", "reviewer": reviewer, "notes": notes, "stage": stage}
+        self._gates[run_id].set()
+        if self._slack:
+            await self._slack.notify(run_id=run_id, stage=stage, action="approved")
+
+    async def reject(self, run_id: str, stage: str, reviewer: str = "", notes: str = "", db: Any = None) -> None:
+        if run_id not in self._gates:
+            self._gates[run_id] = asyncio.Event()
+        self._decisions[run_id] = {"action": "rejected", "reviewer": reviewer, "notes": notes, "stage": stage}
+        self._gates[run_id].set()
+        if self._slack:
+            await self._slack.notify(run_id=run_id, stage=stage, action="rejected")

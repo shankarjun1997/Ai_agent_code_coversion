@@ -22,6 +22,7 @@ class Tenant(PlatformBase):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     db_url_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    plan: Mapped[str] = mapped_column(String(50), nullable=False, default="starter")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
