@@ -1,5 +1,28 @@
 services:
 
+  # ── Postgres — demo source database (CRM/sales mock data) ────────────────
+  demo-db:
+    image: postgres:16-alpine
+    container_name: sqlgen-demo-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     demo
+      POSTGRES_PASSWORD: demo
+      POSTGRES_DB:       crm_demo
+    volumes:
+      - demo_db_data:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5433:5432"   # host 5433 to avoid clash with platform Postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d crm_demo"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    networks:
+      - sqlgen-net
+
   # ── Python FastAPI — pipeline orchestrator ────────────────────────────────
   api:
     build:
@@ -10,10 +33,14 @@ services:
     env_file: .env
     environment:
       - PYTHONUNBUFFERED=1
+      - DEMO_DB_DSN=postgresql://demo:demo@demo-db:5432/crm_demo
     volumes:
       - output_data:/app/output
     ports:
       - "8000:8000"
+    depends_on:
+      demo-db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
@@ -45,6 +72,8 @@ services:
 
 volumes:
   output_data:
+    driver: local
+  demo_db_data:
     driver: local
 
 networks:

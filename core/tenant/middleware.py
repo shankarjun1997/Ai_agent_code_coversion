@@ -9,7 +9,8 @@ from jose import JWTError
 from core.auth.jwt_utils import decode_access_token
 
 # Paths that don't require tenant resolution
-_PUBLIC_PREFIXES = ("/auth/", "/docs", "/openapi", "/redoc", "/health")
+_PUBLIC_PREFIXES = ("/auth/", "/docs", "/openapi", "/redoc", "/health",
+                    "/api/health", "/api/discovery", "/api/stm")
 
 
 class TenantMiddleware(BaseHTTPMiddleware):

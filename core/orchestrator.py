@@ -38,7 +38,10 @@ logger = logging.getLogger(__name__)
 
 class PipelineOrchestrator:
     def __init__(self):
-        self.llm    = LLMClient(api_key=_require("ANTHROPIC_API_KEY"))
+        self.llm    = LLMClient(
+            api_key=_require("OPENROUTER_API_KEY"),
+            model=os.environ.get("LLM_MODEL", "deepseek/deepseek-chat-v3-0324:free"),
+        )
         self.bq     = BQClient(project_id=_require("BQ_PROJECT_ID"))
         self.jira   = JiraClient(
             url=_require("JIRA_URL"),
@@ -146,6 +149,24 @@ class PipelineOrchestrator:
         state_db.append_log(run_id, f"REJECTED by {reviewer}: {notes}")
         return True
 
+    def refine(self, run_id: str, reviewer: str, notes: str, sidebar_inputs: Optional[dict] = None) -> bool:
+        """Re-run Agent 2 with reviewer notes injected — stays in MAPPING_REVIEW after."""
+        row = state_db.get_run(run_id)
+        if not row or row["status"] != "waiting_review":
+            return False
+        run = self._load_run(row)
+        if run.stage != PipelineStage.MAPPING_REVIEW:
+            return False
+        state_db.append_log(run_id, f"REFINE by {reviewer}: {notes}")
+        jira_issue_key = run.jira_issue if run.jira_issue != "DRAFT" else None
+        thread = threading.Thread(
+            target=self._run_mapping,
+            args=(run, jira_issue_key, notes, sidebar_inputs),
+            daemon=True,
+        )
+        thread.start()
+        return True
+
     # ── Internal pipeline execution ───────────────────────────────────────────
 
     def _run_pipeline(
@@ -200,7 +221,7 @@ class PipelineOrchestrator:
         except Exception as exc:
             self._fail(run, exc)
 
-    def _run_mapping(self, run: PipelineRun, jira_issue_key: Optional[str]) -> None:
+    def _run_mapping(self, run: PipelineRun, jira_issue_key: Optional[str], extra_context: str = "", sidebar_inputs: Optional[dict] = None) -> None:
         # Push story to Jira if not yet done
         if jira_issue_key and run.requirements:
             try:
@@ -227,7 +248,7 @@ class PipelineOrchestrator:
         story = run.requirements.jira_story_draft if run.requirements else JiraStory(
             issue_key=run.jira_issue, summary="", description="", acceptance_criteria=""
         )
-        mapping = self.agent2.run(story)
+        mapping = self.agent2.run(story, extra_context=extra_context, sidebar_inputs=sidebar_inputs)
         run.mapping = mapping
         state_db.save_mapping(mapping)
         state_db.upsert_run(run)

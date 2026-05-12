@@ -14,9 +14,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+import shutil
+import tempfile
+
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse, Response
 from pydantic import BaseModel
 
 load_dotenv()
@@ -35,6 +38,8 @@ from core.tenant.middleware import TenantMiddleware
 from routers.auth import router as auth_router
 from routers.pipelines import router as pipeline_router
 from routers.gates import router as gates_router
+from routers.discovery import router as discovery_router
+from routers.stm import router as stm_router
 
 
 def decrypt_db_url(encrypted: str) -> str:
@@ -128,6 +133,8 @@ app.add_middleware(TenantMiddleware)
 app.include_router(auth_router)
 app.include_router(pipeline_router)
 app.include_router(gates_router)
+app.include_router(discovery_router)
+app.include_router(stm_router)
 
 
 # ── Legacy orchestrator singleton ─────────────────────────────────────────────
@@ -196,6 +203,15 @@ def reject_run(run_id: str, req: ApprovalRequest):
     if not ok:
         raise HTTPException(404, "Run not found or not in review state")
     return {"ok": True}
+
+
+@app.post("/api/pipeline/runs/{run_id}/refine")
+def refine_run(run_id: str, req: ApprovalRequest, sidebar_inputs: Optional[dict] = None):
+    orch = get_orchestrator()
+    ok   = orch.refine(run_id, req.reviewer, req.notes, sidebar_inputs=sidebar_inputs)
+    if not ok:
+        raise HTTPException(404, "Run not found or not in mapping review state")
+    return {"ok": True, "action": "refining"}
 
 
 @app.get("/api/pipeline/runs")
@@ -283,6 +299,75 @@ def get_jira_issue(issue_key: str):
         orch  = get_orchestrator()
         story = orch.jira.get_issue(issue_key, os.getenv("JIRA_AC_FIELD"))
         return story.model_dump()
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+# ── Requirements file upload ──────────────────────────────────────────────────
+
+@app.post("/api/requirements/upload")
+async def upload_requirements(file: UploadFile = File(...)):
+    """Upload a DOCX/PDF/TXT requirements doc and return extracted text."""
+    suffix = Path(file.filename).suffix if file.filename else ".tmp"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = tmp.name
+    try:
+        from core.doc_processor import extract_text
+        text = extract_text(tmp_path)
+        return {"filename": file.filename, "text": text, "chars": len(text)}
+    except Exception as exc:
+        raise HTTPException(400, f"Could not extract text: {exc}")
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
+# ── Artifact download ─────────────────────────────────────────────────────────
+
+@app.get("/api/pipeline/runs/{run_id}/artifacts/{filename}/download")
+def download_artifact(run_id: str, filename: str):
+    """Download a generated artifact file."""
+    art_path = Path("output/artifacts") / run_id / filename
+    if art_path.exists():
+        return FileResponse(str(art_path), filename=filename)
+
+    # Fallback: serve from state_db content field
+    artifacts = state_db.get_run_artifacts(run_id)
+    for art in artifacts:
+        if art.get("filename") == filename:
+            content = art.get("content", "")
+            media = "text/plain"
+            if filename.endswith(".sql"):
+                media = "application/sql"
+            elif filename.endswith((".yaml", ".yml")):
+                media = "text/yaml"
+            return Response(
+                content=content,
+                media_type=media,
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+    raise HTTPException(404, f"Artifact '{filename}' not found for run {run_id}")
+
+
+# ── Jira artifact sync ────────────────────────────────────────────────────────
+
+@app.post("/api/pipeline/runs/{run_id}/jira-sync")
+def jira_sync(run_id: str):
+    """Push generated artifacts as a Jira comment."""
+    row = state_db.get_run(run_id)
+    if not row:
+        raise HTTPException(404, "Run not found")
+    artifacts = state_db.get_run_artifacts(run_id)
+    issue_key = row.get("jira_issue", "")
+    if not issue_key or issue_key == "DRAFT":
+        raise HTTPException(400, "No Jira issue associated with this run")
+    try:
+        orch = get_orchestrator()
+        lines = [f"✅ *Engineering artifacts generated* — {len(artifacts)} file(s):\n"]
+        for art in artifacts:
+            lines.append(f"  • `{art.get('filename','')}` — {art.get('explanation','')}")
+        orch.jira.add_comment(issue_key, "\n".join(lines))
+        return {"ok": True, "issue": issue_key, "files": len(artifacts)}
     except Exception as exc:
         raise HTTPException(500, str(exc))
 

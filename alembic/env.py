@@ -16,7 +16,10 @@ target_metadata = PlatformBase.metadata
 
 
 def get_url() -> str:
-    return os.environ.get("DATABASE_URL", config.get_main_option("sqlalchemy.url", ""))
+    url = os.environ.get("DATABASE_URL")
+    if url:
+        return url
+    return config.get_main_option("sqlalchemy.url")
 
 
 def run_migrations_offline() -> None:

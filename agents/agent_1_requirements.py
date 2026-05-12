@@ -63,6 +63,8 @@ OUTPUT_SCHEMA = """{
     }
   ],
   "contradictions": ["Contradiction: X vs Y. Suggestion: ..."],
+  "work_category": "view|stored_procedure|dag|dbt_model|script|mixed",
+  "inferred_output_types": ["sql_view","python_dag"],
   "prototype": {
     "target_table": "dataset.table_name",
     "columns": [
@@ -73,7 +75,19 @@ OUTPUT_SCHEMA = """{
     ],
     "notes": "optional notes on data freshness, grain, etc."
   }
-}"""
+}
+
+work_category must be one of: view, stored_procedure, dag, dbt_model, script, mixed
+inferred_output_types must be from: sql_view, sql_ddl, sql_query, stored_procedure, python_dag, dbt_model, yaml_config, bash_script, dataform_sqlx
+
+Infer work_category and inferred_output_types from the story:
+- Mentions "view", "report", "dashboard" → sql_view
+- Mentions "procedure", "SP", "CALL" → stored_procedure
+- Mentions "DAG", "Airflow", "Composer", "schedule", "orchestrate" → python_dag + yaml_config
+- Mentions "dbt", "transform" → dbt_model
+- Mentions "script", "shell", "deploy" → bash_script
+- Mentions "Dataform" → dataform_sqlx
+"""
 
 
 class RequirementsAgent:
@@ -125,6 +139,8 @@ Return only the JSON object. No markdown fences, no commentary.
             clarifying_questions=questions,
             contradictions=payload.get("contradictions", []),
             prototype=prototype,
+            work_category=payload.get("work_category", "unknown"),
+            inferred_output_types=payload.get("inferred_output_types", []),
         )
         logger.info("Agent 1: requirements doc %s created — %d tasks, %d questions",
                     doc.doc_id, len(doc.task_breakdown), len(doc.clarifying_questions))

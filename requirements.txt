@@ -1,5 +1,5 @@
 # LLM
-anthropic>=0.40.0
+openai>=1.30.0
 
 # Google Cloud
 google-cloud-bigquery>=3.19.0
@@ -15,9 +15,14 @@ PyGithub>=2.3.0
 # Web framework (API service)
 fastapi>=0.111.0
 uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+
+# STM export
+openpyxl>=3.1.0
 
 # Data validation
 pydantic>=2.7.0
+pydantic-settings>=2.3.0
 
 # Config
 python-dotenv>=1.0.0
@@ -42,3 +47,9 @@ cryptography>=42.0.0
 
 # Tests (containers)
 testcontainers[postgres]>=4.4.0
+
+# STM agentic evolution — multi-dialect source providers
+oracledb>=2.0
+pymysql>=1.1
+python-tds>=1.13
+rapidfuzz>=3.6

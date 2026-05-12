@@ -1,0 +1,1345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SQLGen — Mapping Composer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,400;12..96,600;12..96,700;12..96,800&family=Outfit:wght@300;400;500;600&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --navy:        #07111f;
+  --navy-2:      #0d1e30;
+  --navy-3:      #132640;
+  --navy-4:      #1a3050;
+  --navy-5:      #234070;
+  --border:      rgba(255,255,255,0.07);
+  --border-lit:  rgba(251,191,36,0.32);
+  --border-soft: rgba(255,255,255,0.12);
+  --amber:       #fbbf24;
+  --amber-2:     #f59e0b;
+  --amber-dim:   rgba(251,191,36,0.10);
+  --amber-glow:  rgba(251,191,36,0.28);
+  --blue:        #3b82f6;
+  --blue-dim:    rgba(59,130,246,0.14);
+  --emerald:     #10b981;
+  --emerald-dim: rgba(16,185,129,0.14);
+  --rose:        #f43f5e;
+  --rose-dim:    rgba(244,63,94,0.14);
+  --violet:      #a78bfa;
+  --violet-dim:  rgba(167,139,250,0.16);
+  --slate:       #94a3b8;
+  --text:        #e8eef7;
+  --text-dim:    #94a3b8;
+  --text-faint:  #64748b;
+}
+
+html, body {
+  height: 100%;
+  background: var(--navy);
+  color: var(--text);
+  font-family: 'Outfit', system-ui, sans-serif;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 85% -10%, rgba(251,191,36,0.08), transparent 60%),
+    radial-gradient(900px 600px at -10% 110%, rgba(59,130,246,0.10), transparent 55%),
+    linear-gradient(180deg, var(--navy) 0%, #050b14 100%);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Subtle grain overlay */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.04 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  z-index: 1;
+  mix-blend-mode: overlay;
+  opacity: 0.6;
+}
+
+/* Display font helper */
+.display { font-family: 'Bricolage Grotesque', 'Outfit', sans-serif; font-weight: 700; letter-spacing: -0.02em; }
+.display-light { font-family: 'Bricolage Grotesque', 'Outfit', sans-serif; font-weight: 400; letter-spacing: -0.015em; }
+.mono { font-family: 'Fira Code', monospace; font-weight: 500; }
+
+/* ── Layout shell ──────────────────────────────────────────────── */
+.app {
+  position: relative;
+  z-index: 2;
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+/* ── Header ────────────────────────────────────────────────────── */
+.appbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 36px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(7, 17, 31, 0.65);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.brand-mark {
+  width: 36px; height: 36px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--amber) 0%, var(--amber-2) 100%);
+  display: grid; place-items: center;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-weight: 800;
+  color: var(--navy);
+  font-size: 18px;
+  box-shadow: 0 6px 24px rgba(251,191,36,0.35);
+  position: relative;
+}
+.brand-mark::after {
+  content: "";
+  position: absolute; inset: -2px;
+  border-radius: 11px;
+  background: linear-gradient(135deg, transparent, rgba(255,255,255,0.25), transparent);
+  pointer-events: none;
+}
+.brand-name { display: flex; flex-direction: column; line-height: 1; }
+.brand-name b { font-family: 'Bricolage Grotesque', sans-serif; font-weight: 700; font-size: 18px; letter-spacing: -0.02em; }
+.brand-name span { font-size: 11px; color: var(--text-faint); margin-top: 4px; letter-spacing: 0.06em; text-transform: uppercase; }
+
+.crumbs {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12.5px; color: var(--text-dim);
+}
+.crumbs .sep { color: var(--text-faint); }
+.crumbs b { color: var(--text); font-weight: 500; }
+
+.story-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 12px 7px 8px;
+  background: linear-gradient(135deg, var(--amber-dim), rgba(251,191,36,0.04));
+  border: 1px solid var(--border-lit);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--amber);
+}
+.story-chip .key {
+  font-family: 'Fira Code', monospace;
+  background: rgba(7,17,31,0.5);
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+
+.steps { display: flex; align-items: center; gap: 0; }
+.step {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--text-faint);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  position: relative;
+}
+.step .num {
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--border-soft);
+  font-family: 'Fira Code', monospace;
+  font-size: 11px;
+}
+.step.active { color: var(--amber); }
+.step.active .num { border-color: var(--amber); background: var(--amber-dim); color: var(--amber); }
+.step.done { color: var(--emerald); }
+.step.done .num { border-color: var(--emerald); background: var(--emerald-dim); color: var(--emerald); }
+.step + .step::before {
+  content: ""; width: 28px; height: 1px;
+  background: var(--border-soft);
+  margin-right: 4px; margin-left: 0;
+}
+
+/* ── Main grid ─────────────────────────────────────────────────── */
+.work {
+  display: grid;
+  grid-template-columns: 280px 1fr 380px;
+  gap: 28px;
+  padding: 28px 36px 24px;
+  min-height: 0;
+}
+
+/* ── Cards ─────────────────────────────────────────────────────── */
+.card {
+  background: linear-gradient(180deg, rgba(13,30,48,0.62) 0%, rgba(13,30,48,0.45) 100%);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  backdrop-filter: blur(8px);
+}
+.card-title {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 14px;
+}
+.card-title b { color: var(--text-dim); font-weight: 600; }
+
+/* ── Profiles list ─────────────────────────────────────────────── */
+.profile {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all .25s cubic-bezier(.4,0,.2,1);
+}
+.profile + .profile { margin-top: 4px; }
+.profile:hover { background: rgba(255,255,255,0.025); }
+.profile.active {
+  background: linear-gradient(135deg, var(--amber-dim), rgba(251,191,36,0.02));
+  border-color: var(--border-lit);
+  box-shadow: 0 0 0 1px rgba(251,191,36,0.08), 0 8px 24px rgba(0,0,0,0.25);
+}
+.profile-icon {
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  display: grid; place-items: center;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+.icon-oracle  { background: rgba(220,38,38,0.16); color: #fca5a5; border: 1px solid rgba(220,38,38,0.3); }
+.icon-postgres{ background: rgba(59,130,246,0.16); color: #93c5fd; border: 1px solid rgba(59,130,246,0.3); }
+.icon-mssql   { background: rgba(167,139,250,0.18); color: #c4b5fd; border: 1px solid rgba(167,139,250,0.3); }
+.icon-mysql   { background: rgba(245,158,11,0.16); color: #fcd34d; border: 1px solid rgba(245,158,11,0.3); }
+.icon-bq      { background: rgba(16,185,129,0.16); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.3); }
+
+.profile-meta { flex: 1; min-width: 0; }
+.profile-name { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.profile-sub  { font-family: 'Fira Code', monospace; font-size: 10.5px; color: var(--text-faint); margin-top: 2px; }
+.profile-status {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--emerald);
+  box-shadow: 0 0 0 0 rgba(16,185,129,0.5);
+  animation: pulseDot 2.4s infinite;
+  flex-shrink: 0;
+}
+@keyframes pulseDot {
+  0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.5); }
+  70%  { box-shadow: 0 0 0 8px rgba(16,185,129,0); }
+  100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+}
+
+.add-profile {
+  margin-top: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 1px dashed var(--border-soft);
+  background: transparent;
+  border-radius: 10px;
+  color: var(--text-faint);
+  font-family: 'Outfit', sans-serif;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .2s;
+}
+.add-profile:hover { border-color: var(--border-lit); color: var(--amber); background: var(--amber-dim); }
+
+/* ── Center: Schema explorer ───────────────────────────────────── */
+.explorer { display: flex; flex-direction: column; min-height: 0; }
+.explorer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 18px;
+}
+.explorer-title h2 { font-family: 'Bricolage Grotesque', sans-serif; font-weight: 700; font-size: 24px; letter-spacing: -0.02em; }
+.explorer-title p { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+
+.discovery-stat {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.discovery-stat .blink {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--emerald);
+  animation: blink 1.4s infinite;
+}
+@keyframes blink { 50% { opacity: 0.25; } }
+.discovery-stat .ms { color: var(--emerald); font-family: 'Fira Code', monospace; }
+
+.schema-tabs {
+  display: flex; gap: 4px;
+  background: rgba(7,17,31,0.5);
+  border: 1px solid var(--border);
+  padding: 4px;
+  border-radius: 11px;
+  margin-bottom: 14px;
+  width: fit-content;
+}
+.schema-tab {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-family: 'Fira Code', monospace;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border-radius: 8px;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: all .2s;
+  border: none;
+  background: transparent;
+}
+.schema-tab:hover { color: var(--text-dim); }
+.schema-tab.active {
+  background: var(--amber);
+  color: var(--navy);
+  box-shadow: 0 4px 14px rgba(251,191,36,0.25);
+}
+.schema-tab .count {
+  margin-left: 6px;
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.search-row {
+  display: flex; gap: 10px; align-items: center;
+  margin-bottom: 12px;
+}
+.search-input {
+  flex: 1;
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 14px;
+  background: rgba(7,17,31,0.55);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: border .2s;
+}
+.search-input:focus-within {
+  border-color: var(--border-lit);
+  box-shadow: 0 0 0 3px rgba(251,191,36,0.1);
+}
+.search-input svg { color: var(--text-faint); flex-shrink: 0; }
+.search-input input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+}
+.search-input input::placeholder { color: var(--text-faint); }
+.search-input .kbd {
+  font-family: 'Fira Code', monospace;
+  font-size: 10.5px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  color: var(--text-faint);
+}
+
+/* Tables list */
+.tables-list {
+  flex: 1;
+  overflow-y: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+.tables-list::-webkit-scrollbar { width: 6px; }
+.tables-list::-webkit-scrollbar-thumb { background: var(--border-soft); border-radius: 3px; }
+
+.table-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(7,17,31,0.35);
+  cursor: pointer;
+  transition: all .25s cubic-bezier(.4,0,.2,1);
+  margin-bottom: 6px;
+}
+.table-row:hover {
+  background: rgba(13,30,48,0.55);
+  border-color: var(--border-soft);
+  transform: translateX(2px);
+}
+.table-row.expanded {
+  background: linear-gradient(135deg, rgba(251,191,36,0.04), transparent);
+  border-color: var(--border-lit);
+}
+.table-icon {
+  color: var(--text-faint);
+  display: grid; place-items: center;
+}
+.table-row.expanded .table-icon { color: var(--amber); }
+.table-name {
+  font-family: 'Fira Code', monospace;
+  font-size: 13px;
+  color: var(--text);
+}
+.table-name .schema { color: var(--text-faint); }
+.table-meta {
+  display: flex; align-items: center; gap: 14px;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: 'Fira Code', monospace;
+}
+.table-meta b { color: var(--text-dim); font-weight: 500; }
+.table-tag {
+  font-size: 10px;
+  font-family: 'Fira Code', monospace;
+  letter-spacing: 0.04em;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: var(--blue-dim);
+  color: #93c5fd;
+  border: 1px solid rgba(59,130,246,0.25);
+}
+.table-tag.fact  { background: var(--emerald-dim); color: #6ee7b7; border-color: rgba(16,185,129,0.3); }
+.table-tag.dim   { background: var(--violet-dim); color: #c4b5fd; border-color: rgba(167,139,250,0.3); }
+.table-tag.audit { background: rgba(148,163,184,0.12); color: var(--slate); border-color: rgba(148,163,184,0.25); }
+
+/* Columns inside expanded table */
+.cols {
+  margin: 6px 0 14px 22px;
+  border-left: 1px solid var(--border-lit);
+  padding: 4px 0 4px 14px;
+  animation: fadeSlide .35s cubic-bezier(.4,0,.2,1);
+}
+@keyframes fadeSlide {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.col {
+  display: grid;
+  grid-template-columns: 22px 1fr 110px auto;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .15s;
+  position: relative;
+}
+.col:hover { background: rgba(255,255,255,0.025); }
+.col.checked { background: linear-gradient(135deg, rgba(251,191,36,0.07), transparent); }
+
+/* Fancy checkbox */
+.check {
+  width: 16px; height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border-soft);
+  display: grid; place-items: center;
+  transition: all .15s;
+  flex-shrink: 0;
+}
+.col:hover .check { border-color: var(--text-dim); }
+.col.checked .check {
+  background: var(--amber);
+  border-color: var(--amber);
+}
+.col.checked .check::after {
+  content: "";
+  width: 4px; height: 7px;
+  border: solid var(--navy);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.col-name {
+  display: flex; align-items: center; gap: 8px;
+  font-family: 'Fira Code', monospace;
+  font-size: 12px;
+  color: var(--text);
+}
+.col-name .desc {
+  font-family: 'Outfit', sans-serif;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.type-chip {
+  font-family: 'Fira Code', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-align: center;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+}
+.type-chip.t-string { background: var(--blue-dim); color: #93c5fd; border-color: rgba(59,130,246,0.2); }
+.type-chip.t-number { background: var(--emerald-dim); color: #6ee7b7; border-color: rgba(16,185,129,0.2); }
+.type-chip.t-date   { background: var(--amber-dim); color: var(--amber); border-color: rgba(251,191,36,0.2); }
+.type-chip.t-bool   { background: var(--violet-dim); color: #c4b5fd; border-color: rgba(167,139,250,0.2); }
+.type-chip.t-blob   { background: rgba(148,163,184,0.1); color: var(--slate); border-color: rgba(148,163,184,0.2); }
+
+.pii-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 9.5px;
+  font-family: 'Fira Code', monospace;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: var(--rose-dim);
+  color: #fda4af;
+  border: 1px solid rgba(244,63,94,0.3);
+  box-shadow: 0 0 0 0 rgba(244,63,94,0.3);
+  animation: piiGlow 3s ease-in-out infinite;
+}
+@keyframes piiGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(244,63,94,0); }
+  50%      { box-shadow: 0 0 8px 0 rgba(244,63,94,0.4); }
+}
+
+/* ── Right rail: cart ──────────────────────────────────────────── */
+.cart {
+  display: flex; flex-direction: column;
+  min-height: 0;
+}
+.cart-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px;
+}
+.cart-head h3 {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+.cart-head .count {
+  font-family: 'Fira Code', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--amber);
+  background: var(--amber-dim);
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-lit);
+  letter-spacing: 0.04em;
+}
+
+.target-block {
+  margin-bottom: 18px;
+  padding: 14px;
+  background: rgba(16,185,129,0.04);
+  border: 1px solid rgba(16,185,129,0.18);
+  border-radius: 12px;
+  position: relative;
+}
+.target-block .label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6ee7b7;
+  margin-bottom: 8px;
+  display: flex; align-items: center; gap: 8px;
+}
+.target-block .label::before {
+  content: "";
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--emerald);
+  box-shadow: 0 0 0 3px rgba(16,185,129,0.18);
+}
+.target-block .target-path {
+  font-family: 'Fira Code', monospace;
+  font-size: 13px;
+  display: flex; align-items: center; gap: 6px;
+}
+.target-path .ds { color: var(--text-dim); }
+.target-path .tb { color: var(--text); font-weight: 500; }
+.target-block .edit {
+  position: absolute; top: 12px; right: 12px;
+  background: transparent; border: none; cursor: pointer;
+  color: var(--text-faint);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all .15s;
+}
+.target-block .edit:hover { color: var(--emerald); background: rgba(16,185,129,0.08); }
+
+.cart-list {
+  flex: 1;
+  overflow-y: auto;
+  margin: 0 -6px;
+  padding: 0 6px;
+}
+.cart-list::-webkit-scrollbar { width: 6px; }
+.cart-list::-webkit-scrollbar-thumb { background: var(--border-soft); border-radius: 3px; }
+
+.cart-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.cart-empty svg { color: var(--text-faint); opacity: 0.4; }
+
+.cart-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(7,17,31,0.45);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  margin-bottom: 6px;
+  animation: cartIn .35s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes cartIn {
+  from { opacity: 0; transform: translateX(20px) scale(0.95); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+.cart-item .src {
+  font-family: 'Fira Code', monospace;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 3px;
+}
+.cart-item .arrow {
+  color: var(--amber);
+  margin: 0 4px;
+}
+.cart-item .tgt {
+  font-family: 'Fira Code', monospace;
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 500;
+}
+.cart-item .transform {
+  font-family: 'Fira Code', monospace;
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+}
+.cart-item .x {
+  align-self: start;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  width: 22px; height: 22px;
+  border-radius: 5px;
+  display: grid; place-items: center;
+  transition: all .15s;
+}
+.cart-item .x:hover { color: var(--rose); background: var(--rose-dim); }
+
+/* Governance summary */
+.gov {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: rgba(7,17,31,0.4);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.gov-title {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 10px;
+}
+.gov-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px;
+  padding: 4px 0;
+}
+.gov-row .key { color: var(--text-dim); }
+.gov-row .val { font-family: 'Fira Code', monospace; color: var(--text); }
+.gov-row .val.warn { color: var(--rose); }
+.gov-row .val.ok   { color: var(--emerald); }
+
+/* ── Footer / CTA ──────────────────────────────────────────────── */
+.foot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 36px;
+  border-top: 1px solid var(--border);
+  background: linear-gradient(180deg, transparent, rgba(7,17,31,0.6));
+  backdrop-filter: blur(10px);
+}
+.foot-left { display: flex; align-items: center; gap: 16px; font-size: 12px; color: var(--text-dim); }
+.foot-left .stat-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  background: rgba(13,30,48,0.6);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11.5px;
+}
+.foot-left .stat-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--emerald); }
+.foot-left .stat-pill b { color: var(--text); font-family: 'Fira Code', monospace; font-weight: 500; }
+
+.foot-right { display: flex; align-items: center; gap: 12px; }
+
+.btn {
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: all .25s cubic-bezier(.4,0,.2,1);
+  border: 1px solid var(--border-soft);
+  background: transparent;
+  color: var(--text);
+}
+.btn:hover { border-color: var(--text-dim); background: rgba(255,255,255,0.04); }
+
+.btn-primary {
+  position: relative;
+  padding: 14px 24px;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--amber) 0%, var(--amber-2) 100%);
+  color: var(--navy);
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 12px;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.3) inset,
+    0 10px 30px rgba(251,191,36,0.35),
+    0 0 0 1px rgba(251,191,36,0.5);
+  transition: transform .2s, box-shadow .25s;
+  overflow: hidden;
+}
+.btn-primary::before {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(120deg, transparent 30%, rgba(255,255,255,0.4) 50%, transparent 70%);
+  transform: translateX(-100%);
+  transition: transform .8s;
+}
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 1px 0 rgba(255,255,255,0.3) inset, 0 16px 38px rgba(251,191,36,0.45), 0 0 0 1px rgba(251,191,36,0.6); }
+.btn-primary:hover::before { transform: translateX(100%); }
+.btn-primary:disabled {
+  opacity: 0.4; cursor: not-allowed;
+  background: linear-gradient(135deg, #5d6678 0%, #4a5266 100%);
+  color: var(--text-dim);
+  box-shadow: none;
+}
+.btn-primary .agent-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 9px;
+  background: rgba(7,17,31,0.25);
+  border-radius: 6px;
+  font-family: 'Fira Code', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--navy);
+}
+
+/* ── Stagger entrance ──────────────────────────────────────────── */
+.fade-in { opacity: 0; animation: fadeUp .6s cubic-bezier(.4,0,.2,1) forwards; }
+.fade-in.d1 { animation-delay: .05s; }
+.fade-in.d2 { animation-delay: .15s; }
+.fade-in.d3 { animation-delay: .25s; }
+.fade-in.d4 { animation-delay: .35s; }
+.fade-in.d5 { animation-delay: .45s; }
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="env,react">
+const { useState, useMemo, useEffect } = React;
+
+// ── API client ──────────────────────────────────────────────────────
+const API_BASE = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+  ? "http://localhost:8000"
+  : `http://${location.hostname}:8000`;
+
+async function api(path, opts = {}) {
+  const r = await fetch(API_BASE + path, {
+    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+    ...opts,
+  });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+// ── Type → CSS class mapper ─────────────────────────────────────────
+function typeClass(t) {
+  const x = (t || "").toLowerCase();
+  if (/(varchar|character|text|char|uuid|json|name)/.test(x)) return "t-string";
+  if (/(int|serial|numeric|decimal|real|double|float)/.test(x)) return "t-number";
+  if (/(bool)/.test(x))                                        return "t-bool";
+  if (/(date|time|timestamp)/.test(x))                         return "t-date";
+  if (/(bytea|blob)/.test(x))                                  return "t-blob";
+  return "t-string";
+}
+
+// ── PII heuristic on column name (mirrors backend rules) ────────────
+const PII_HIGH = ["email","phone","mobile","ssn","tax_id","passport","date_of_birth","dob","birthday","credit_card","card_number","ip_address"];
+const PII_MED  = ["first_name","last_name","full_name","given_name","family_name","address","street","city","postal_code","zip","country","gender"];
+function detectPii(name) {
+  const n = (name || "").toLowerCase();
+  if (PII_HIGH.some(k => n.includes(k))) return { pii:true, level:"high" };
+  if (PII_MED.some(k => n.includes(k)))  return { pii:true, level:"medium" };
+  return { pii:false, level:"none" };
+}
+
+function fmtRows(n) {
+  if (n === null || n === undefined) return "—";
+  if (n >= 1e9) return (n/1e9).toFixed(1) + "B";
+  if (n >= 1e6) return (n/1e6).toFixed(1) + "M";
+  if (n >= 1e3) return (n/1e3).toFixed(1) + "K";
+  return String(n);
+}
+
+function inferTargetName(col, isPiiHigh) {
+  const snake = (col || "").toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+  return isPiiHigh ? `${snake}_hash` : snake;
+}
+
+function inferTransform(name, pgType, isPii, level) {
+  if (isPii && level === "high") return `TO_HEX(SHA256(CAST(${name} AS STRING)))  -- PII hash`;
+  if (/timestamp/i.test(pgType))  return `${name}  -- timestamptz`;
+  if (/date/i.test(pgType))       return `${name}  -- DATE`;
+  return name;
+}
+
+function mapBqType(pg) {
+  const x = (pg || "").toLowerCase();
+  if (/json/.test(x))                                               return "JSON";
+  if (/(varchar|character|text|char|uuid|name)/.test(x))            return "STRING";
+  if (/(bytea)/.test(x))                                            return "BYTES";
+  if (/(bool)/.test(x))                                             return "BOOL";
+  if (/(numeric|decimal)/.test(x))                                  return "NUMERIC";
+  if (/(real|double|float)/.test(x))                                return "FLOAT64";
+  if (/(int|serial)/.test(x))                                       return "INT64";
+  if (/timestamp/.test(x))                                          return "TIMESTAMP";
+  if (/^date$/.test(x))                                             return "DATE";
+  if (/time/.test(x))                                               return "TIME";
+  return "STRING";
+}
+
+// ── Icons ───────────────────────────────────────────────────────────
+const I = {
+  search: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+  table:  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>,
+  chevron:<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>,
+  plus:   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+  x:      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+  arrow:  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>,
+  spark:  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l3 3M16 16l3 3M19 5l-3 3M8 16l-3 3"/></svg>,
+  pencil: <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+  empty:  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>,
+  bot:    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><line x1="12" y1="7" x2="12" y2="11"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>,
+};
+
+// ── Components ──────────────────────────────────────────────────────
+
+function Header() {
+  return (
+    <header className="appbar fade-in">
+      <div className="brand">
+        <div className="brand-mark">SQ</div>
+        <div className="brand-name">
+          <b>SQLGen</b>
+          <span>Mapping Composer</span>
+        </div>
+      </div>
+
+      <div className="crumbs">
+        <span>Pipelines</span>
+        <span className="sep">/</span>
+        <b>DATA-127 — Customer 360 unified view</b>
+        <span className="sep">/</span>
+        <span style={{color:"var(--amber)"}}>Compose mapping</span>
+      </div>
+
+      <div className="story-chip">
+        <span className="key">DATA-127</span>
+        <span>Customer 360 unified view</span>
+      </div>
+    </header>
+  );
+}
+
+function StepIndicator({ step }) {
+  const steps = [
+    { n: "01", label: "Pick source" },
+    { n: "02", label: "Pick target" },
+    { n: "03", label: "Review fields" },
+    { n: "04", label: "Run Agent 2" },
+  ];
+  return (
+    <div className="steps" style={{padding:"6px 36px 12px"}}>
+      {steps.map((s,i)=>(
+        <div key={s.n} className={`step ${i < step ? "done" : i === step ? "active" : ""}`}>
+          <span className="num">{s.n}</span>
+          <span>{s.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ProfileList({ profiles, active, onPick }) {
+  const dialectClass = (d) => `icon-${d}`;
+  return (
+    <div className="card fade-in d1">
+      <div className="card-title">
+        <b>Source connections</b>
+        <span>{profiles.length} registered</span>
+      </div>
+      {profiles.map(p => (
+        <div
+          key={p.id}
+          className={`profile ${active===p.id ? "active" : ""}`}
+          onClick={()=>onPick(p.id)}
+          title={p.status === "illustrative" ? "Illustrative-only — no live connection" : p.host}
+        >
+          <div className={`profile-icon ${dialectClass(p.dialect)}`}>{p.icon}</div>
+          <div className="profile-meta">
+            <div className="profile-name">{p.label}</div>
+            <div className="profile-sub">{p.host}</div>
+          </div>
+          {p.status === "connected"
+            ? <div className="profile-status" />
+            : <div className="profile-status" style={{background:"var(--text-faint)", animation:"none"}} />}
+        </div>
+      ))}
+      <button className="add-profile">+ Register new connection</button>
+    </div>
+  );
+}
+
+function SchemaTabs({ schemas, active, onPick }) {
+  if (!schemas || schemas.length === 0) {
+    return <div className="schema-tabs" style={{opacity:0.5}}><span className="schema-tab">no schemas</span></div>;
+  }
+  return (
+    <div className="schema-tabs">
+      {schemas.map(s => (
+        <button
+          key={s.name}
+          className={`schema-tab ${active===s.name ? "active" : ""}`}
+          onClick={()=>onPick(s.name)}
+        >
+          {s.name}
+          <span className="count">{s.table_count}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ColumnRow({ col, checked, onToggle }) {
+  const piiInfo = detectPii(col.name);
+  return (
+    <div className={`col ${checked ? "checked" : ""}`} onClick={onToggle}>
+      <div className="check" />
+      <div className="col-name">
+        <span>{col.name}</span>
+        {col.description && <span className="desc">— {col.description}</span>}
+        {!col.description && col.is_primary_key && <span className="desc">— primary key</span>}
+      </div>
+      <div className={`type-chip ${typeClass(col.type)}`}>{col.type}</div>
+      <div>
+        {piiInfo.pii && <span className="pii-badge">PII · {piiInfo.level}</span>}
+      </div>
+    </div>
+  );
+}
+
+function TableRow({ t, schema, expanded, onToggle, selection, onColToggle, columns }) {
+  return (
+    <>
+      <div className={`table-row ${expanded ? "expanded" : ""}`} onClick={onToggle}>
+        <div className="table-icon" style={{transform: expanded ? "rotate(90deg)" : "none", transition:"transform .2s"}}>
+          {I.chevron}
+        </div>
+        <div className="table-name">
+          <span className="schema">{schema}.</span>
+          <b>{t.name}</b>
+        </div>
+        <div className="table-meta">
+          <span><b>{fmtRows(t.rows)}</b> rows</span>
+          {t.size && <span>{t.size}</span>}
+        </div>
+        <span className={`table-tag ${t.tag}`}>{t.tag}</span>
+      </div>
+      {expanded && (
+        <div className="cols">
+          {!columns && <div style={{padding:"10px 12px", fontSize:11, color:"var(--text-faint)"}}>Loading columns…</div>}
+          {columns && columns.length === 0 && <div style={{padding:"10px 12px", fontSize:11, color:"var(--text-faint)"}}>No columns.</div>}
+          {columns && columns.map(c => {
+            const isChecked = selection.some(s => s.table===t.name && s.col===c.name);
+            return (
+              <ColumnRow
+                key={c.name}
+                col={c}
+                checked={isChecked}
+                onToggle={()=>onColToggle(t.name, c)}
+              />
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
+function Explorer({
+  schemas, schema, onSchemaPick,
+  tables, expandedTable, onTableToggle,
+  columnsByTable, selection, onColToggle,
+  query, onQuery,
+  discoveryMs, illustrative,
+}) {
+  const filtered = (tables || []).filter(t => t.name.toLowerCase().includes(query.toLowerCase()));
+
+  return (
+    <div className="explorer fade-in d2">
+      <div className="explorer-head">
+        <div className="explorer-title">
+          <h2>Schema explorer</h2>
+          <p>Pick the source columns to map to your BigQuery target. Live introspection — no static metadata.</p>
+        </div>
+        <div className="discovery-stat">
+          {illustrative ? (
+            <>
+              <span style={{width:6,height:6,borderRadius:"50%",background:"var(--text-faint)"}} />
+              <span style={{color:"var(--text-faint)"}}>illustrative profile · not connected</span>
+            </>
+          ) : (
+            <>
+              <span className="blink" />
+              <span>discovered</span>
+              <span className="ms">{discoveryMs ? `${discoveryMs} ms` : "—"}</span>
+              <span>·</span>
+              <span>{(tables||[]).length} tables · live introspection</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      <SchemaTabs schemas={schemas} active={schema} onPick={onSchemaPick} />
+
+      <div className="search-row">
+        <div className="search-input">
+          {I.search}
+          <input
+            placeholder="Filter tables…"
+            value={query}
+            onChange={e => onQuery(e.target.value)}
+          />
+          <span className="kbd">⌘K</span>
+        </div>
+      </div>
+
+      <div className="tables-list">
+        {filtered.length === 0 && (
+          <div style={{padding:"24px 14px", fontSize:12, color:"var(--text-faint)", textAlign:"center"}}>
+            {tables ? "No tables match your filter." : "Loading tables…"}
+          </div>
+        )}
+        {filtered.map(t => (
+          <TableRow
+            key={t.name}
+            t={t}
+            schema={schema}
+            expanded={expandedTable===t.name}
+            onToggle={()=>onTableToggle(t.name)}
+            selection={selection}
+            onColToggle={onColToggle}
+            columns={columnsByTable[t.name]}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Cart({ selection, onRemove, target, onTargetChange, partition }) {
+  const piiCount = selection.filter(s => detectPii(s.col).pii).length;
+
+  return (
+    <div className="cart fade-in d3">
+      <div className="cart-head">
+        <h3>Mapping cart</h3>
+        <span className="count">{selection.length} fields</span>
+      </div>
+
+      <div className="target-block">
+        <div className="label">Target — BigQuery</div>
+        <div className="target-path">
+          <input
+            value={target.dataset}
+            onChange={e => onTargetChange({ ...target, dataset: e.target.value })}
+            style={{background:"transparent",border:"none",color:"var(--text-dim)",fontFamily:"Fira Code,monospace",fontSize:13,outline:"none",width:140}}
+          />
+          <span style={{color:"var(--text-faint)"}}>.</span>
+          <input
+            value={target.table}
+            onChange={e => onTargetChange({ ...target, table: e.target.value })}
+            style={{background:"transparent",border:"none",color:"var(--text)",fontFamily:"Fira Code,monospace",fontSize:13,fontWeight:500,outline:"none",flex:1}}
+          />
+        </div>
+      </div>
+
+      <div className="cart-list">
+        {selection.length === 0 ? (
+          <div className="cart-empty">
+            <div style={{display:"grid", placeItems:"center"}}>{I.empty}</div>
+            <div style={{marginTop:14}}>No columns selected yet.</div>
+            <div style={{marginTop:6, fontSize:11, color:"var(--text-faint)"}}>Tick columns in the schema explorer →</div>
+          </div>
+        ) : selection.map((s, i) => (
+          <div key={`${s.table}-${s.col}-${i}`} className="cart-item">
+            <div>
+              <div className="src">{s.table}.{s.col}  {I.arrow}  </div>
+              <div className="tgt">{s.target}  <span style={{color:"var(--text-faint)", fontSize:10, marginLeft:6}}>{s.type}</span></div>
+              <div className="transform">↳ {s.transform}</div>
+            </div>
+            <button className="x" onClick={()=>onRemove(s)}>{I.x}</button>
+          </div>
+        ))}
+      </div>
+
+      <div className="gov">
+        <div className="gov-title">Governance preview</div>
+        <div className="gov-row"><span className="key">PII fields detected</span><span className={`val ${piiCount > 0 ? "warn" : "ok"}`}>{piiCount}</span></div>
+        <div className="gov-row"><span className="key">Suggested partition</span><span className="val">{partition || "—"}</span></div>
+        <div className="gov-row"><span className="key">Idempotency strategy</span><span className="val">delete_insert</span></div>
+        <div className="gov-row"><span className="key">Data owner</span><span className="val">data-platform-team</span></div>
+      </div>
+    </div>
+  );
+}
+
+function Footer({ count, onRun, running, lastSummary, error }) {
+  return (
+    <footer className="foot fade-in d4">
+      <div className="foot-left">
+        <span className="stat-pill"><span className="dot" /> Mapping engine ready</span>
+        {error && <span style={{color:"var(--rose)"}}>⚠ {error}</span>}
+        {!error && lastSummary && (
+          <span style={{color:"var(--text-faint)"}}>
+            Last run: <b style={{color:"var(--text)"}}>{lastSummary.field_count}</b> fields ·
+            {" "}<b style={{color:"var(--rose)"}}>{lastSummary.pii_count}</b> PII ·
+            {" "}partition <b style={{color:"var(--text)",fontFamily:"Fira Code,monospace"}}>{lastSummary.partition_field || "—"}</b>
+          </span>
+        )}
+      </div>
+      <div className="foot-right">
+        {lastSummary && (
+          <>
+            <a className="btn" href={`${API_BASE}/api/stm/${lastSummary.stm_id}/export.csv`} download>Download .csv</a>
+            <a className="btn" href={`${API_BASE}/api/stm/${lastSummary.stm_id}/export.xlsx`} download style={{borderColor:"var(--emerald)",color:"#6ee7b7"}}>Download STM .xlsx</a>
+          </>
+        )}
+        <button className="btn-primary" disabled={count===0 || running} onClick={onRun}>
+          <span className="agent-badge">{I.bot} STM</span>
+          <span>{running ? "Generating mapping…" : `Generate mapping → ${count} fields`}</span>
+          {!running && I.arrow}
+        </button>
+      </div>
+    </footer>
+  );
+}
+
+// ── App ─────────────────────────────────────────────────────────────
+function App() {
+  const [profiles, setProfiles]               = useState([]);
+  const [activeProfile, setActiveProfile]     = useState(null);
+  const [illustrative, setIllustrative]       = useState(false);
+  const [schemas, setSchemas]                 = useState(null);
+  const [schema, setSchema]                   = useState(null);
+  const [tables, setTables]                   = useState(null);
+  const [expandedTable, setExpandedTable]     = useState(null);
+  const [columnsByTable, setColumnsByTable]   = useState({});
+  const [selection, setSelection]             = useState([]);
+  const [query, setQuery]                     = useState("");
+  const [running, setRunning]                 = useState(false);
+  const [lastSummary, setLastSummary]         = useState(null);
+  const [error, setError]                     = useState(null);
+  const [target, setTarget]                   = useState({ dataset:"analytics_warehouse", table:"fact_customer_360" });
+  const [discoveryMs, setDiscoveryMs]         = useState(null);
+
+  // Load profiles on mount
+  useEffect(() => {
+    api("/api/discovery/profiles")
+      .then(r => {
+        setProfiles(r.profiles);
+        const live = r.profiles.find(p => p.status === "connected");
+        if (live) setActiveProfile(live.id);
+        else if (r.profiles.length) setActiveProfile(r.profiles[0].id);
+      })
+      .catch(e => setError("Could not load profiles: " + e.message));
+  }, []);
+
+  // Load schemas when profile changes
+  useEffect(() => {
+    if (!activeProfile) return;
+    setSchemas(null); setSchema(null); setTables(null); setColumnsByTable({}); setExpandedTable(null);
+    const t0 = performance.now();
+    api(`/api/discovery/profiles/${activeProfile}/schemas`)
+      .then(r => {
+        setSchemas(r.schemas);
+        setIllustrative(!!r.illustrative);
+        if (r.schemas.length) setSchema(r.schemas[0].name);
+        setDiscoveryMs(Math.round(performance.now() - t0));
+      })
+      .catch(e => setError("schemas failed: " + e.message));
+  }, [activeProfile]);
+
+  // Load tables when schema changes
+  useEffect(() => {
+    if (!activeProfile || !schema) return;
+    setTables(null);
+    const t0 = performance.now();
+    api(`/api/discovery/profiles/${activeProfile}/schemas/${encodeURIComponent(schema)}/tables`)
+      .then(r => {
+        setTables(r.tables);
+        setDiscoveryMs(Math.round(performance.now() - t0));
+        if (r.tables.length && !expandedTable) setExpandedTable(r.tables[0].name);
+      })
+      .catch(e => setError("tables failed: " + e.message));
+  }, [activeProfile, schema]);
+
+  // Load columns lazily on table expand
+  useEffect(() => {
+    if (!expandedTable || columnsByTable[expandedTable]) return;
+    api(`/api/discovery/profiles/${activeProfile}/schemas/${encodeURIComponent(schema)}/tables/${expandedTable}/columns`)
+      .then(r => setColumnsByTable(prev => ({ ...prev, [expandedTable]: r.columns })))
+      .catch(e => setError("columns failed: " + e.message));
+  }, [expandedTable]);
+
+  const handleColToggle = (table, col) => {
+    setSelection(prev => {
+      const existing = prev.find(s => s.table===table && s.col===col.name);
+      if (existing) return prev.filter(s => !(s.table===table && s.col===col.name));
+      const piiInfo = detectPii(col.name);
+      const bq      = mapBqType(col.type);
+      const tgt     = inferTargetName(col.name, piiInfo.pii && piiInfo.level === "high");
+      const xform   = inferTransform(col.name, col.type, piiInfo.pii, piiInfo.level);
+      return [...prev, { table, col: col.name, target: tgt, type: bq, transform: xform }];
+    });
+  };
+
+  const handleRemove = (s) => {
+    setSelection(prev => prev.filter(x => !(x.table===s.table && x.col===s.col)));
+  };
+
+  const handleRun = async () => {
+    if (illustrative) {
+      setError("This profile is illustrative-only. Pick the live Postgres profile to generate STM.");
+      return;
+    }
+    setRunning(true); setError(null);
+    try {
+      const summary = await api("/api/stm/generate", {
+        method: "POST",
+        body: JSON.stringify({
+          profile_id: activeProfile,
+          schema: schema,
+          selections: selection.map(s => ({ table: s.table, column: s.col })),
+          target_dataset: target.dataset,
+          target_table:   target.table,
+        }),
+      });
+      setLastSummary(summary);
+      // auto-trigger xlsx download
+      window.location.href = `${API_BASE}/api/stm/${summary.stm_id}/export.xlsx`;
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  // Determine step indicator
+  let step = 0;
+  if (activeProfile && !illustrative) step = 1;
+  if (selection.length > 0)           step = 2;
+  if (lastSummary)                    step = 4;
+
+  return (
+    <div className="app">
+      <Header />
+      <StepIndicator step={step} />
+      <main className="work">
+        <ProfileList profiles={profiles} active={activeProfile} onPick={setActiveProfile} />
+        <Explorer
+          schemas={schemas}
+          schema={schema}
+          onSchemaPick={setSchema}
+          tables={tables}
+          expandedTable={expandedTable}
+          onTableToggle={(name)=>setExpandedTable(prev => prev===name ? null : name)}
+          columnsByTable={columnsByTable}
+          selection={selection}
+          onColToggle={handleColToggle}
+          query={query}
+          onQuery={setQuery}
+          discoveryMs={discoveryMs}
+          illustrative={illustrative}
+        />
+        <Cart
+          selection={selection}
+          onRemove={handleRemove}
+          target={target}
+          onTargetChange={setTarget}
+          partition={lastSummary && lastSummary.partition_field}
+        />
+      </main>
+      <Footer
+        count={selection.length}
+        onRun={handleRun}
+        running={running}
+        lastSummary={lastSummary}
+        error={error}
+      />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

@@ -34,6 +34,9 @@ class OutputType(str, Enum):
     PYTHON_DAG         = "python_dag"
     PYTHON_SCRIPT      = "python_script"
     CLOUD_FUNCTION     = "cloud_function"
+    YAML_CONFIG        = "yaml_config"
+    BASH_SCRIPT        = "bash_script"
+    SHELL_SCRIPT       = "shell_script"
 
 
 class IdempotencyStrategy(str, Enum):
@@ -94,12 +97,16 @@ class RequirementsDoc(BaseModel):
     acceptance_criteria:  str = ""
     raw_input_summary:    str = ""
     jira_story_draft:     Optional[JiraStory] = None
-    task_breakdown:       List[str] = []     # ingestion / curation / audit / DQ / observability tasks
+    task_breakdown:       List[str] = []
     clarifying_questions: List[ClarifyingQuestion] = []
-    contradictions:       List[str] = []     # detected contradictions + suggestions
+    contradictions:       List[str] = []
     prototype:            Optional[PrototypeSpec] = None
     approval_status:      ApprovalStatus = ApprovalStatus.PENDING
     reviewer_notes:       Optional[str] = None
+    # Inferred from story content by Agent 1
+    work_category:        str = "unknown"   # view|stored_procedure|dag|dbt_model|script|mixed
+    inferred_output_types: List[str] = []   # e.g. ["sql_view","python_dag"]
+    sidebar_context:      str = ""          # text from uploaded requirements doc
 
 
 # ── Data Mapping (Agent 2 — single source of truth) ──────────────────────────

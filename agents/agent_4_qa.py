@@ -87,13 +87,17 @@ class QAAgent:
         target = f"{mapping.target_dataset}.{mapping.target_table}"
         sources = ", ".join(f"{t.dataset}.{t.table}" for t in mapping.source_tables)
 
-        sql_artifacts = [a for a in pkg.artifacts if a.filename.endswith(".sql")]
+        sql_artifacts = [a for a in (pkg.artifacts if pkg else []) if a.filename.endswith(".sql")]
         artifact_summary = "\n".join(
             f"  - {a.filename} (dry_run_valid={a.dry_run_valid})"
             for a in sql_artifacts
-        )
+        ) or "none"
 
-        ac_text = requirements.jira_story_draft.acceptance_criteria
+        ac_text = (
+            requirements.jira_story_draft.acceptance_criteria
+            if requirements and requirements.jira_story_draft
+            else "No acceptance criteria provided."
+        )
 
         prompt = f"""Generate QA test cases for this BigQuery pipeline:
 
@@ -137,10 +141,12 @@ Return only the JSON array.
 """
         raw = self.llm.complete_json(prompt, system=SYSTEM_PROMPT)
         if not isinstance(raw, list):
-            raw = raw.get("test_cases", [])
+            raw = raw.get("test_cases", []) if isinstance(raw, dict) else []
 
         tests = []
         for t in raw:
+            if not isinstance(t, dict):
+                continue
             try:
                 tests.append(TestCase(
                     test_name=t["test_name"],
