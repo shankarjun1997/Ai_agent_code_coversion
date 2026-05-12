@@ -122,3 +122,194 @@ class PostgresProvider:
             ]
         finally:
             await conn.close()
+
+
+import asyncio
+import time
+from typing import Any, List
+from core.discovery.base import (
+    SourceProvider, PingResult, TableInfo, ColumnInfo, FKInfo,
+    ColumnProfile, ColumnHit,
+)
+
+
+class PostgresProviderAsync(SourceProvider):
+    """Async SourceProvider wrapper for Postgres discovery."""
+    dialect = "postgres"
+
+    async def ping(self, profile: Any) -> PingResult:
+        def _sync():
+            t0 = time.perf_counter()
+            try:
+                import asyncpg
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    conn = loop.run_until_complete(asyncpg.connect(profile.dsn, timeout=5))
+                    loop.run_until_complete(conn.close())
+                    return PingResult(ok=True, latency_ms=int((time.perf_counter() - t0) * 1000))
+                finally:
+                    loop.close()
+            except Exception as exc:
+                return PingResult(ok=False, message=str(exc))
+        return await asyncio.to_thread(_sync)
+
+    async def list_schemas(self, profile: Any) -> List[str]:
+        def _sync():
+            import asyncpg
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                async def _query():
+                    conn = await asyncpg.connect(profile.dsn)
+                    try:
+                        rows = await conn.fetch("""
+                            SELECT schema_name FROM information_schema.schemata
+                            WHERE schema_name NOT IN ('pg_catalog','information_schema','pg_toast')
+                            ORDER BY schema_name
+                        """)
+                        return [r[0] for r in rows]
+                    finally:
+                        await conn.close()
+                return loop.run_until_complete(_query())
+            finally:
+                loop.close()
+        return await asyncio.to_thread(_sync)
+
+    async def list_tables(self, profile: Any, schema: str) -> List[TableInfo]:
+        def _sync():
+            import asyncpg
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                async def _query():
+                    conn = await asyncpg.connect(profile.dsn)
+                    try:
+                        rows = await conn.fetch("""
+                            SELECT table_name FROM information_schema.tables
+                            WHERE table_schema = $1 AND table_type='BASE TABLE'
+                            ORDER BY table_name
+                        """, schema)
+                        return [TableInfo(schema=schema, name=r[0]) for r in rows]
+                    finally:
+                        await conn.close()
+                return loop.run_until_complete(_query())
+            finally:
+                loop.close()
+        return await asyncio.to_thread(_sync)
+
+    async def get_columns(self, profile: Any, schema: str, table: str) -> List[ColumnInfo]:
+        def _sync():
+            import asyncpg
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                async def _query():
+                    conn = await asyncpg.connect(profile.dsn)
+                    try:
+                        rows = await conn.fetch("""
+                            SELECT c.column_name, c.data_type, c.is_nullable, c.column_default,
+                                   CASE WHEN tc.constraint_type='PRIMARY KEY' THEN TRUE ELSE FALSE END AS is_pk
+                            FROM information_schema.columns c
+                            LEFT JOIN information_schema.key_column_usage kcu
+                              ON kcu.table_schema=c.table_schema AND kcu.table_name=c.table_name AND kcu.column_name=c.column_name
+                            LEFT JOIN information_schema.table_constraints tc
+                              ON tc.constraint_name=kcu.constraint_name AND tc.constraint_type='PRIMARY KEY'
+                            WHERE c.table_schema=$1 AND c.table_name=$2
+                            ORDER BY c.ordinal_position
+                        """, schema, table)
+                        return [
+                            ColumnInfo(
+                                schema=schema, table=table, name=r[0],
+                                data_type=r[1], nullable=(r[2] == "YES"),
+                                default=r[3], is_primary_key=bool(r[4]),
+                            )
+                            for r in rows
+                        ]
+                    finally:
+                        await conn.close()
+                return loop.run_until_complete(_query())
+            finally:
+                loop.close()
+        return await asyncio.to_thread(_sync)
+
+    async def get_foreign_keys(self, profile: Any, schema: str, table: str) -> List[FKInfo]:
+        def _sync():
+            import asyncpg
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                async def _query():
+                    conn = await asyncpg.connect(profile.dsn)
+                    try:
+                        rows = await conn.fetch("""
+                            SELECT kcu.column_name, ccu.table_schema, ccu.table_name, ccu.column_name, tc.constraint_name
+                            FROM information_schema.table_constraints tc
+                            JOIN information_schema.key_column_usage kcu USING (constraint_name, table_schema)
+                            JOIN information_schema.constraint_column_usage ccu USING (constraint_name, table_schema)
+                            WHERE tc.constraint_type='FOREIGN KEY' AND tc.table_schema=$1 AND tc.table_name=$2
+                        """, schema, table)
+                        return [
+                            FKInfo(schema=schema, table=table, column=r[0],
+                                   ref_schema=r[1], ref_table=r[2], ref_column=r[3], constraint_name=r[4])
+                            for r in rows
+                        ]
+                    finally:
+                        await conn.close()
+                return loop.run_until_complete(_query())
+            finally:
+                loop.close()
+        return await asyncio.to_thread(_sync)
+
+    async def profile_column(self, profile: Any, schema: str, table: str, column: str, sample_rows: int = 0) -> ColumnProfile:
+        def _sync():
+            import asyncpg
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                async def _query():
+                    conn = await asyncpg.connect(profile.dsn)
+                    try:
+                        row = await conn.fetchrow(f'SELECT COUNT(*) as rc, COUNT(DISTINCT "{column}") as dc, 100.0 * AVG(CASE WHEN "{column}" IS NULL THEN 1 ELSE 0 END) as np FROM "{schema}"."{table}"')
+                        rc, dc, np_ = row[0], row[1], float(row[2]) if row[2] is not None else None
+                        samples = []
+                        if sample_rows > 0:
+                            sample_rows_data = await conn.fetch(f'SELECT "{column}" FROM "{schema}"."{table}" WHERE "{column}" IS NOT NULL LIMIT {int(sample_rows)}')
+                            samples = [r[0] for r in sample_rows_data]
+                        return ColumnProfile(row_count=rc, distinct_count=dc, null_pct=np_, sample_values=samples)
+                    finally:
+                        await conn.close()
+                return loop.run_until_complete(_query())
+            finally:
+                loop.close()
+        return await asyncio.to_thread(_sync)
+
+    async def search_by_keywords(self, profile: Any, keywords: List[str], limit: int = 50) -> List[ColumnHit]:
+        def _sync():
+            if not keywords:
+                return []
+            import asyncpg
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                async def _query():
+                    conn = await asyncpg.connect(profile.dsn)
+                    try:
+                        patterns = [f"%{k.lower()}%" for k in keywords]
+                        placeholders = " OR ".join([f"LOWER(column_name) LIKE ${i+1}" for i in range(len(patterns))])
+                        sql = f"""
+                            SELECT table_schema, table_name, column_name, data_type
+                            FROM information_schema.columns
+                            WHERE table_schema NOT IN ('pg_catalog','information_schema','pg_toast')
+                              AND ({placeholders})
+                            ORDER BY table_schema, table_name, ordinal_position
+                            LIMIT ${len(patterns)+1}
+                        """
+                        rows = await conn.fetch(sql, *patterns, limit)
+                        return [ColumnHit(schema=r[0], table=r[1], column=r[2], data_type=r[3], score=1.0, matched_on="name") for r in rows]
+                    finally:
+                        await conn.close()
+                return loop.run_until_complete(_query())
+            finally:
+                loop.close()
+        return await asyncio.to_thread(_sync)
