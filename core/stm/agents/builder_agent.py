@@ -131,11 +131,13 @@ class BuilderAgent(StmAgent):
         except Exception as exc:
             logger.warning("BuilderAgent: xlsx export failed: %s", exc)
 
+        # xlsx_bytes is excluded from the blackboard JSON (not serialisable).
+        # Callers that need xlsx should regenerate via exporter.to_xlsx(MappingResult).
         stm_result: Dict[str, Any] = {
             **result.summary(),
             "status": "done",
             "overall_band": bb.validation.overall_band,
-            "xlsx_bytes": xlsx_bytes,
+            "xlsx_available": xlsx_bytes is not None,
         }
 
         logger.info(

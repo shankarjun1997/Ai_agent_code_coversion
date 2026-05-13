@@ -113,13 +113,11 @@ async def test_builder_agent_stm_result_populated():
 
 
 @pytest.mark.asyncio
-async def test_builder_agent_xlsx_bytes_produced():
+async def test_builder_agent_xlsx_available_flag():
     delta = await BuilderAgent().run(_ctx(_bb()))
     result = delta.updates["stm_result"]
-    assert result["xlsx_bytes"] is not None
-    assert isinstance(result["xlsx_bytes"], bytes)
-    # xlsx magic bytes: PK zip header
-    assert result["xlsx_bytes"][:2] == b"PK"
+    # xlsx_bytes excluded from blackboard JSON; xlsx_available flag indicates readiness
+    assert result["xlsx_available"] is True
 
 
 @pytest.mark.asyncio
