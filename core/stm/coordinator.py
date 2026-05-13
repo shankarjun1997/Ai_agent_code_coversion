@@ -26,7 +26,7 @@ from core.stm.agents.metadata_agent import MetadataAgent
 from core.stm.agents.semantic_mapping_agent import SemanticMappingAgent
 from core.stm.agents.transformation_agent import TransformationAgent
 from core.stm.agents.validation_agent import ValidationAgent
-from core.stm.blackboard import GateDecision, StageStatus, StmBlackboard
+from core.stm.blackboard import StageStatus, StmBlackboard
 from core.stm.events import EventKind, SseEvent, get_broker
 from core.stm.locks import SessionLockRegistry, get_registry as get_lock_registry
 from core.stm.persistence import (
@@ -202,6 +202,7 @@ async def _run_pipeline(
         else:
             # Normal completion (no break from refine)
             await set_session_status(session_id, "done")
+            await _jira_writeback(bb)
             await broker.publish(session_id, SseEvent(
                 kind=EventKind.session_done, stage="L6",
                 data={"session_id": session_id}, session_id=session_id,
@@ -338,6 +339,44 @@ async def resume_session(
     )
     _running[session_id] = task
     task.add_done_callback(lambda _t: _running.pop(session_id, None))
+
+
+async def _jira_writeback(bb: StmBlackboard) -> None:
+    """Post a comment on the Jira issue when session completes successfully.
+
+    Env-gated by STM_JIRA_WRITEBACK_ENABLED. Best-effort — failures logged but
+    do not surface to the user.
+    """
+    if os.environ.get("STM_JIRA_WRITEBACK_ENABLED", "false").lower() not in ("1", "true", "yes"):
+        return
+    if not bb.intent or bb.intent.source != "jira" or not bb.intent.jira_issue_key:
+        return
+
+    url = os.environ.get("JIRA_URL")
+    email = os.environ.get("JIRA_EMAIL")
+    token = os.environ.get("JIRA_API_TOKEN")
+    if not (url and email and token):
+        logger.warning("STM_JIRA_WRITEBACK_ENABLED set but Jira creds missing")
+        return
+
+    issue_key = bb.intent.jira_issue_key
+    band = bb.validation.overall_band if bb.validation else "n/a"
+    n_fields = len(bb.candidate_mappings.mappings) if bb.candidate_mappings else 0
+    body = (
+        f"STM generated for {bb.target_dataset}.{bb.target_table}\n"
+        f"Session: {bb.session_id}\n"
+        f"Confidence band: {band}\n"
+        f"Field mappings: {n_fields}\n"
+        f"Sources: {', '.join(bb.selected_source_profiles)}"
+    )
+
+    try:
+        from agents.shared.jira_client import JiraClient
+        client = JiraClient(url=url, email=email, api_token=token)
+        await asyncio.to_thread(client.add_comment, issue_key, body)
+        logger.info("Posted Jira comment on %s for session %s", issue_key, bb.session_id)
+    except Exception as exc:
+        logger.warning("Jira write-back failed for %s: %s", issue_key, exc)
 
 
 def is_running(session_id: str) -> bool:

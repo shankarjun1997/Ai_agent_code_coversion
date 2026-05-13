@@ -223,6 +223,59 @@ async def post_gate_decision(session_id: str, gate_name: str, payload: GateDecis
     return {"session_id": session_id, "gate": gate_name, "decision": payload.decision}
 
 
+@router.post("/{session_id}/clone", status_code=201)
+async def clone_session(session_id: str) -> Dict[str, Any]:
+    """Start a fresh session re-using the source profiles + target + raw input
+    of an existing session. Useful when reviewers want to try a different intent
+    framing or re-run from scratch after a rejection."""
+    try:
+        src = await load_blackboard(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
+
+    new_id = str(uuid.uuid4())
+    bb = StmBlackboard(
+        session_id=new_id,
+        target_table=src.target_table,
+        target_dataset=src.target_dataset,
+        dialect_target=src.dialect_target,
+        selected_source_profiles=list(src.selected_source_profiles),
+        intent=IntentArtifact(
+            source=src.intent.source if src.intent else "freetext",
+            raw_input=src.intent.raw_input if src.intent else "",
+            jira_issue_key=src.intent.jira_issue_key if src.intent else None,
+        ),
+        metadata_graph=MetadataGraph(),
+        candidate_mappings=CandidateMappings(
+            target_table=src.target_table,
+            target_dataset=src.target_dataset,
+        ),
+        transformations=Transformations(),
+        validation=ValidationReport(),
+        gates={
+            "gate1_metadata": GateDecision(name="gate1_metadata"),
+            "gate2_validation": GateDecision(name="gate2_validation"),
+        },
+    )
+
+    try:
+        await start_session(
+            bb,
+            raw_input=bb.intent.raw_input,
+            intent_source=bb.intent.source,
+            jira_issue_key=bb.intent.jira_issue_key,
+        )
+    except Exception as exc:
+        logger.exception("Clone failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Clone failed: {exc}")
+
+    return {
+        "session_id": new_id,
+        "cloned_from": session_id,
+        "events_url": f"/api/stm/sessions/{new_id}/events",
+    }
+
+
 @router.get("/{session_id}/export")
 async def export_xlsx(session_id: str):
     """Download the STM xlsx for a completed session."""

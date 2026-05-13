@@ -1760,6 +1760,19 @@ function AgenticSession({ sessionId, onReset }) {
     window.location.href = `${API_BASE}/api/stm/sessions/${sessionId}/export`;
   };
 
+  const cloneSession = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/stm/sessions/${sessionId}/clone`, { method: "POST" });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      const data = await res.json();
+      const u = new URL(window.location.href);
+      u.searchParams.set("session", data.session_id);
+      window.location.href = u.toString();
+    } catch (e) {
+      setStreamErr("Clone failed: " + e.message);
+    }
+  };
+
   return (
     <div className="agentic-shell">
       <div className="agentic-head">
@@ -1807,6 +1820,7 @@ function AgenticSession({ sessionId, onReset }) {
 
       <div className="agentic-actions">
         <button className="btn-ghost" onClick={onReset}>New session</button>
+        {terminal && <button className="btn-ghost" onClick={cloneSession}>Clone & retry</button>}
         {terminal === "done" && (
           <button className="btn-primary" onClick={downloadXlsx}>Download STM xlsx</button>
         )}
