@@ -778,6 +778,143 @@ body::before {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ── Agentic mode ───────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(3,7,14,0.72);
+  backdrop-filter: blur(8px);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal {
+  background: linear-gradient(180deg, var(--navy-2) 0%, var(--navy) 100%);
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  padding: 28px;
+  width: min(560px, 92vw);
+  max-height: 88vh; overflow-y: auto;
+  box-shadow: 0 30px 70px rgba(0,0,0,0.5);
+}
+.modal-field {
+  display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px;
+}
+.modal-field > span {
+  font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em;
+}
+.modal-field input, .modal-field textarea, .modal-field select {
+  background: var(--navy-3); color: var(--text);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px; padding: 10px 12px;
+  font-family: inherit; font-size: 14px;
+}
+.modal-field textarea { resize: vertical; font-family: 'Fira Code', monospace; font-size: 13px; }
+.modal-field input:focus, .modal-field textarea:focus, .modal-field select:focus {
+  outline: none; border-color: var(--amber); box-shadow: 0 0 0 2px var(--amber-dim);
+}
+.modal-actions {
+  display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;
+}
+.btn-primary {
+  background: var(--amber); color: var(--navy);
+  border: none; border-radius: 8px; padding: 10px 18px;
+  font-weight: 600; cursor: pointer; font-family: inherit; font-size: 14px;
+}
+.btn-primary:hover:not(:disabled) { background: var(--amber-2); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-ghost {
+  background: transparent; color: var(--text-dim);
+  border: 1px solid var(--border-soft); border-radius: 8px; padding: 10px 18px;
+  cursor: pointer; font-family: inherit; font-size: 14px;
+}
+.btn-ghost:hover:not(:disabled) { color: var(--text); border-color: var(--border-lit); }
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  background: var(--navy-3); color: var(--text-dim);
+  border: 1px solid var(--border-soft); border-radius: 999px;
+  padding: 6px 12px; cursor: pointer; font-family: inherit; font-size: 13px;
+}
+.chip-on { background: var(--amber-dim); color: var(--amber); border-color: var(--amber); }
+.banner { padding: 10px 14px; border-radius: 8px; margin: 10px 0; font-size: 13px; }
+.banner-error { background: var(--rose-dim); color: var(--rose); border: 1px solid rgba(244,63,94,0.3); }
+.banner-warn { background: var(--amber-dim); color: var(--amber); border: 1px solid var(--amber); }
+
+.agentic-shell { padding: 28px 36px; max-width: 1100px; margin: 0 auto; }
+.agentic-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border);
+}
+.agentic-meta { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.pill {
+  background: var(--navy-3); color: var(--text-dim);
+  border: 1px solid var(--border-soft); border-radius: 999px;
+  padding: 4px 12px; font-size: 12px; font-family: 'Fira Code', monospace;
+}
+.pill-running { background: var(--blue-dim); color: var(--blue); border-color: var(--blue); }
+.pill-awaiting_review { background: var(--amber-dim); color: var(--amber); border-color: var(--amber); }
+.pill-done { background: var(--emerald-dim); color: var(--emerald); border-color: var(--emerald); }
+.pill-failed, .pill-rejected { background: var(--rose-dim); color: var(--rose); border-color: var(--rose); }
+.pill-green { background: var(--emerald-dim); color: var(--emerald); border-color: var(--emerald); }
+.pill-amber { background: var(--amber-dim); color: var(--amber); border-color: var(--amber); }
+.pill-red { background: var(--rose-dim); color: var(--rose); border-color: var(--rose); }
+
+.stepper { display: flex; flex-direction: column; gap: 10px; }
+.stage-row {
+  background: var(--navy-2);
+  border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden;
+  transition: border-color 0.15s;
+}
+.stage-row.stage-running { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue-dim); }
+.stage-row.stage-waiting { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber-dim); }
+.stage-row.stage-ready { border-color: rgba(16,185,129,0.4); }
+.stage-row.stage-failed { border-color: var(--rose); }
+.stage-head {
+  display: flex; align-items: center; gap: 14px;
+  width: 100%; padding: 14px 18px;
+  background: transparent; border: none; color: inherit;
+  cursor: pointer; font-family: inherit; font-size: 14px; text-align: left;
+}
+.stage-head:hover { background: rgba(255,255,255,0.02); }
+.stage-id {
+  font-family: 'Fira Code', monospace; font-weight: 600;
+  color: var(--amber); width: 32px;
+}
+.stage-label { flex: 1; }
+.stage-badge {
+  font-size: 11px; padding: 3px 10px; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  background: var(--navy-3); color: var(--text-faint);
+}
+.stage-badge.running { background: var(--blue-dim); color: var(--blue); }
+.stage-badge.ready { background: var(--emerald-dim); color: var(--emerald); }
+.stage-badge.waiting { background: var(--amber-dim); color: var(--amber); }
+.stage-badge.failed { background: var(--rose-dim); color: var(--rose); }
+.stage-meta { font-size: 12px; color: var(--text-faint); font-family: 'Fira Code', monospace; }
+.stage-caret { color: var(--text-faint); }
+.stage-body {
+  background: var(--navy); padding: 14px 18px;
+  font-family: 'Fira Code', monospace; font-size: 12px;
+  color: var(--text-dim); border-top: 1px solid var(--border);
+  max-height: 320px; overflow: auto;
+}
+
+.gate-panel {
+  background: linear-gradient(180deg, rgba(251,191,36,0.06), transparent);
+  border: 1px solid var(--amber);
+  border-radius: 12px; padding: 22px;
+  margin: 24px 0;
+}
+.gate-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.gate-title { font-weight: 600; color: var(--amber); font-size: 16px; }
+.gate-sub { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
+
+.agentic-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 28px; }
+.empty-agentic {
+  padding: 60px 36px; text-align: center; color: var(--text-dim);
+  display: flex; gap: 16px; align-items: center; justify-content: center;
+}
+.text-rose { color: var(--rose); font-size: 14px; }
+.text-dim { color: var(--text-dim); }
 </style>
 </head>
 <body>
@@ -1339,7 +1476,405 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+// ── Agentic Mode ────────────────────────────────────────────────────
+const STAGE_LABELS = {
+  L1: "Intent Extraction",
+  L2: "Metadata Intelligence",
+  L3: "Semantic Mapping",
+  L4: "Transformation Synthesis",
+  L5: "Validation & Governance",
+  L6: "STM Generation",
+};
+const STAGES = ["L1","L2","L3","L4","L5","L6"];
+const GATE_AT = { L2: "gate1_metadata", L5: "gate2_validation" };
+
+function SessionCreateModal({ profiles, onClose, onCreated }) {
+  const [target, setTarget] = useState({ table: "fact_customer_360", dataset: "analytics_warehouse" });
+  const [selectedProfiles, setSelectedProfiles] = useState(() => {
+    const live = profiles.find(p => p.status === "connected");
+    return live ? [live.id] : profiles.length ? [profiles[0].id] : [];
+  });
+  const [rawInput, setRawInput] = useState("Load customer 360 dimension from CRM into BigQuery warehouse");
+  const [intentSource, setIntentSource] = useState("freetext");
+  const [jiraKey, setJiraKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const toggleProfile = (id) =>
+    setSelectedProfiles(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
+
+  const submit = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const body = {
+        target_table: target.table,
+        target_dataset: target.dataset,
+        source_profiles: selectedProfiles,
+        raw_input: rawInput,
+        intent_source: intentSource,
+        jira_issue_key: intentSource === "jira" ? jiraKey : null,
+      };
+      const res = await fetch(`${API_BASE}/api/stm/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.text();
+        throw new Error(`${res.status}: ${detail}`);
+      }
+      const data = await res.json();
+      onCreated(data.session_id);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <h2 className="display" style={{fontSize:"22px", marginBottom:"18px"}}>New Agentic STM Session</h2>
+
+        <label className="modal-field">
+          <span>Target table</span>
+          <input value={target.table} onChange={e => setTarget({...target, table:e.target.value})}/>
+        </label>
+        <label className="modal-field">
+          <span>Target dataset</span>
+          <input value={target.dataset} onChange={e => setTarget({...target, dataset:e.target.value})}/>
+        </label>
+
+        <div className="modal-field">
+          <span>Source profiles</span>
+          <div className="chip-row">
+            {profiles.map(p => (
+              <button
+                key={p.id}
+                className={`chip ${selectedProfiles.includes(p.id) ? "chip-on" : ""}`}
+                onClick={() => toggleProfile(p.id)}>
+                {p.icon} {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label className="modal-field">
+          <span>Intent source</span>
+          <select value={intentSource} onChange={e => setIntentSource(e.target.value)}>
+            <option value="freetext">Free text</option>
+            <option value="jira">Jira issue</option>
+          </select>
+        </label>
+
+        {intentSource === "jira" && (
+          <label className="modal-field">
+            <span>Jira issue key</span>
+            <input placeholder="ENG-123" value={jiraKey} onChange={e => setJiraKey(e.target.value)}/>
+          </label>
+        )}
+
+        <label className="modal-field">
+          <span>{intentSource === "jira" ? "Additional notes (optional)" : "Describe what you want"}</span>
+          <textarea rows={4} value={rawInput} onChange={e => setRawInput(e.target.value)}/>
+        </label>
+
+        {err && <div className="banner banner-error">{err}</div>}
+
+        <div className="modal-actions">
+          <button className="btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="btn-primary" onClick={submit} disabled={busy || !selectedProfiles.length || !rawInput.trim()}>
+            {busy ? "Starting..." : "Start session"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StageRow({ stage, status, duration, model, onExpand, expanded, artifact }) {
+  const badge = status === "ready" ? "ready" : status === "running" ? "running"
+              : status === "failed" ? "failed" : status === "waiting" ? "waiting" : "pending";
+  return (
+    <div className={`stage-row stage-${badge}`}>
+      <button className="stage-head" onClick={onExpand}>
+        <span className="stage-id">{stage}</span>
+        <span className="stage-label">{STAGE_LABELS[stage]}</span>
+        <span className={`stage-badge ${badge}`}>{badge}</span>
+        {duration != null && <span className="stage-meta">{duration}ms</span>}
+        {model && <span className="stage-meta">{model}</span>}
+        <span className="stage-caret">{expanded ? "▾" : "▸"}</span>
+      </button>
+      {expanded && artifact && (
+        <pre className="stage-body">{JSON.stringify(artifact, null, 2)}</pre>
+      )}
+    </div>
+  );
+}
+
+function GatePanel({ sessionId, gateName, stage, onDecided }) {
+  const [reviewer, setReviewer] = useState("");
+  const [notes, setNotes] = useState("");
+  const [refineTarget, setRefineTarget] = useState(stage === "L2" ? "L2" : "L3");
+  const [refineFeedback, setRefineFeedback] = useState("");
+  const [mode, setMode] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const submit = async (decision) => {
+    setBusy(true); setErr(null);
+    try {
+      const body = { decision, reviewer: reviewer || null, notes: notes || null };
+      if (decision === "refine") {
+        body.refine_target = refineTarget;
+        body.refine_feedback = refineFeedback;
+      }
+      const res = await fetch(`${API_BASE}/api/stm/sessions/${sessionId}/gates/${gateName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.text();
+        throw new Error(`${res.status}: ${detail}`);
+      }
+      onDecided(decision);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const validTargets = stage === "L2" ? ["L1","L2"] : ["L1","L2","L3","L4","L5"];
+
+  return (
+    <div className="gate-panel">
+      <div className="gate-head">
+        <span className="gate-title">Gate review · {gateName}</span>
+        <span className="gate-sub">awaiting decision</span>
+      </div>
+      <label className="modal-field">
+        <span>Reviewer</span>
+        <input value={reviewer} placeholder="your name / email" onChange={e => setReviewer(e.target.value)}/>
+      </label>
+      <label className="modal-field">
+        <span>Notes</span>
+        <textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional context"/>
+      </label>
+
+      {mode === "refine" && (
+        <>
+          <label className="modal-field">
+            <span>Re-run from stage</span>
+            <select value={refineTarget} onChange={e => setRefineTarget(e.target.value)}>
+              {validTargets.map(s => <option key={s} value={s}>{s} — {STAGE_LABELS[s]}</option>)}
+            </select>
+          </label>
+          <label className="modal-field">
+            <span>Refinement instructions</span>
+            <textarea rows={3} value={refineFeedback} onChange={e => setRefineFeedback(e.target.value)}
+                      placeholder="What should the agents do differently?"/>
+          </label>
+        </>
+      )}
+
+      {err && <div className="banner banner-error">{err}</div>}
+
+      <div className="modal-actions">
+        {mode !== "refine" ? (
+          <>
+            <button className="btn-ghost" disabled={busy} onClick={() => submit("rejected")}>Reject</button>
+            <button className="btn-ghost" disabled={busy} onClick={() => setMode("refine")}>Refine</button>
+            <button className="btn-primary" disabled={busy} onClick={() => submit("approved")}>Approve</button>
+          </>
+        ) : (
+          <>
+            <button className="btn-ghost" disabled={busy} onClick={() => setMode(null)}>Cancel</button>
+            <button className="btn-primary" disabled={busy || !refineFeedback.trim()} onClick={() => submit("refine")}>
+              Send refinement
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AgenticSession({ sessionId, onReset }) {
+  const [summary, setSummary]               = useState(null);
+  const [stages, setStages]                 = useState({});  // {L1: {status, duration_ms, llm_model}, ...}
+  const [artifacts, setArtifacts]           = useState({});  // {L1: {...}, ...}
+  const [activeGate, setActiveGate]         = useState(null); // {gate, stage}
+  const [expanded, setExpanded]             = useState(null);
+  const [streamErr, setStreamErr]           = useState(null);
+  const [terminal, setTerminal]             = useState(null); // "done" | "failed" | "rejected"
+
+  // Poll summary periodically
+  useEffect(() => {
+    const refresh = () => {
+      fetch(`${API_BASE}/api/stm/sessions/${sessionId}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) setSummary(s); })
+        .catch(() => {});
+    };
+    refresh();
+    const id = setInterval(refresh, 2500);
+    return () => clearInterval(id);
+  }, [sessionId]);
+
+  // Subscribe to SSE
+  useEffect(() => {
+    const es = new EventSource(`${API_BASE}/api/stm/sessions/${sessionId}/events`);
+    es.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        const kind = msg.event;
+        const stage = msg.stage;
+        const data = msg.data || {};
+
+        if (kind === "stage_started" && stage) {
+          setStages(prev => ({ ...prev, [stage]: { ...(prev[stage]||{}), status: "running" } }));
+        } else if (kind === "stage_ready" && stage) {
+          setStages(prev => ({ ...prev, [stage]: { ...(prev[stage]||{}), status: "ready", duration_ms: data.duration_ms, llm_model: data.llm_model } }));
+        } else if (kind === "stage_failed" && stage) {
+          setStages(prev => ({ ...prev, [stage]: { ...(prev[stage]||{}), status: "failed", error: data.error } }));
+        } else if (kind === "gate_waiting") {
+          setActiveGate({ gate: data.gate, stage });
+          setStages(prev => ({ ...prev, [stage]: { ...(prev[stage]||{}), status: "waiting" } }));
+        } else if (kind === "gate_decided") {
+          setActiveGate(null);
+        } else if (kind === "session_done") {
+          setTerminal("done"); es.close();
+        } else if (kind === "session_failed") {
+          setTerminal(data.reason === "gate_rejected" ? "rejected" : "failed"); es.close();
+        }
+      } catch (e) { /* ignore parse errors */ }
+    };
+    es.onerror = () => { setStreamErr("Event stream interrupted"); };
+    return () => es.close();
+  }, [sessionId]);
+
+  const downloadXlsx = () => {
+    window.location.href = `${API_BASE}/api/stm/sessions/${sessionId}/export`;
+  };
+
+  return (
+    <div className="agentic-shell">
+      <div className="agentic-head">
+        <div>
+          <div className="display" style={{fontSize:"22px"}}>Agentic STM Session</div>
+          <div className="mono text-dim" style={{fontSize:"12px", marginTop:"4px"}}>{sessionId}</div>
+        </div>
+        <div className="agentic-meta">
+          {summary && (
+            <>
+              <span className="pill">{summary.target_dataset}.{summary.target_table}</span>
+              <span className="pill">{summary.source_profiles?.length || 0} sources</span>
+              <span className={`pill pill-${summary.status}`}>{summary.status}</span>
+              {summary.overall_band && <span className={`pill pill-${summary.overall_band}`}>band: {summary.overall_band}</span>}
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="stepper">
+        {STAGES.map(s => (
+          <StageRow
+            key={s}
+            stage={s}
+            status={stages[s]?.status || (summary && STAGES.indexOf(summary.current_stage) > STAGES.indexOf(s) ? "ready" : "pending")}
+            duration={stages[s]?.duration_ms}
+            model={stages[s]?.llm_model}
+            expanded={expanded === s}
+            onExpand={() => setExpanded(prev => prev === s ? null : s)}
+            artifact={artifacts[s]}
+          />
+        ))}
+      </div>
+
+      {activeGate && (
+        <GatePanel
+          sessionId={sessionId}
+          gateName={activeGate.gate}
+          stage={activeGate.stage}
+          onDecided={(d) => setActiveGate(null)}
+        />
+      )}
+
+      {streamErr && <div className="banner banner-warn">{streamErr}</div>}
+
+      <div className="agentic-actions">
+        <button className="btn-ghost" onClick={onReset}>New session</button>
+        {terminal === "done" && (
+          <button className="btn-primary" onClick={downloadXlsx}>Download STM xlsx</button>
+        )}
+        {terminal === "failed" && <span className="text-rose">Session failed</span>}
+        {terminal === "rejected" && <span className="text-rose">Session rejected at gate</span>}
+      </div>
+    </div>
+  );
+}
+
+function AgenticApp() {
+  const [profiles, setProfiles] = useState([]);
+  const [showModal, setShowModal] = useState(true);
+  const [sessionId, setSessionId] = useState(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/discovery/profiles`)
+      .then(r => r.json())
+      .then(r => setProfiles(r.profiles || []))
+      .catch(() => {});
+  }, []);
+
+  // If URL has ?session=<id>, jump straight to it
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sid = params.get("session");
+    if (sid) { setSessionId(sid); setShowModal(false); }
+  }, []);
+
+  const onCreated = (sid) => {
+    setSessionId(sid);
+    setShowModal(false);
+    const u = new URL(window.location.href);
+    u.searchParams.set("session", sid);
+    window.history.replaceState(null, "", u.toString());
+  };
+
+  const reset = () => {
+    setSessionId(null);
+    setShowModal(true);
+    const u = new URL(window.location.href);
+    u.searchParams.delete("session");
+    window.history.replaceState(null, "", u.toString());
+  };
+
+  return (
+    <div className="app">
+      <Header />
+      <main className="work" style={{display:"block"}}>
+        {sessionId
+          ? <AgenticSession sessionId={sessionId} onReset={reset}/>
+          : <div className="empty-agentic">No active session. <button className="btn-primary" onClick={() => setShowModal(true)}>Start one</button></div>
+        }
+        {showModal && (
+          <SessionCreateModal
+            profiles={profiles}
+            onClose={() => setShowModal(false)}
+            onCreated={onCreated}
+          />
+        )}
+      </main>
+    </div>
+  );
+}
+
+const _params = new URLSearchParams(window.location.search);
+const _isAgentic = _params.get("mode") === "agentic";
+ReactDOM.createRoot(document.getElementById("root")).render(_isAgentic ? <AgenticApp /> : <App />);
 </script>
 </body>
 </html>
