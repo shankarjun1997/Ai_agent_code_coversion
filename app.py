@@ -40,6 +40,7 @@ from routers.pipelines import router as pipeline_router
 from routers.gates import router as gates_router
 from routers.discovery import router as discovery_router
 from routers.stm import router as stm_router
+from routers.stm_sessions import router as stm_sessions_router
 
 
 def decrypt_db_url(encrypted: str) -> str:
@@ -95,6 +96,12 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Startup recovery skipped: %s", exc)
 
+    # STM agentic session recovery: re-queue sessions stuck in 'running'
+    try:
+        await _recover_stm_sessions()
+    except Exception as exc:
+        logger.warning("STM session recovery skipped: %s", exc)
+
     yield
 
     await close_engine()
@@ -110,6 +117,23 @@ def _recover_stale_runs() -> None:
             logger.warning("Recovered stale run: %s", run["run_id"])
     except AttributeError:
         pass  # state_db may not implement get_stale_running_runs
+
+
+async def _recover_stm_sessions() -> None:
+    """Re-queue any STM agentic sessions stuck in 'running' state after restart."""
+    try:
+        from core.stm.persistence import list_running_sessions
+        from core.stm.coordinator import resume_session
+        stale = await list_running_sessions()
+        for row in stale:
+            sid = row["session_id"]
+            logger.warning("STM recovery: re-queuing session %s", sid)
+            try:
+                await resume_session(sid)
+            except Exception as exc:
+                logger.warning("STM recovery: failed to resume %s: %s", sid, exc)
+    except Exception as exc:
+        logger.warning("STM session recovery error: %s", exc)
 
 
 # ── App factory ───────────────────────────────────────────────────────────────
@@ -135,6 +159,7 @@ app.include_router(pipeline_router)
 app.include_router(gates_router)
 app.include_router(discovery_router)
 app.include_router(stm_router)
+app.include_router(stm_sessions_router)
 
 
 # ── Legacy orchestrator singleton ─────────────────────────────────────────────
