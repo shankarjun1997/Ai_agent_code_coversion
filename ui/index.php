@@ -37,6 +37,10 @@ $failed    = count(array_filter($runs, fn($r) => $r['status'] === 'failed'));
       <a href="/pages/pipelines.php" class="nav-link">Pipelines</a>
       <a href="/pages/requirements.php" class="nav-link">Requirements</a>
       <a href="/pages/mappings.php"  class="nav-link">Mappings</a>
+      <a href="/mapping_compose_react.html?mode=agentic" class="nav-link">
+        Agentic STM
+        <span class="ml-1 px-1.5 py-0.5 bg-amber-400 text-gray-900 rounded text-[10px] font-bold align-middle">NEW</span>
+      </a>
       <a href="/pages/engineering.php" class="nav-link">Engineering</a>
       <a href="/pages/qa.php"        class="nav-link">QA</a>
     </div>
@@ -84,6 +88,43 @@ $failed    = count(array_filter($runs, fn($r) => $r['status'] === 'failed'));
         </div>
       </div>
       <?php endif; ?>
+
+      <!-- Agentic STM spotlight -->
+      <div class="rounded-xl p-6 bg-gradient-to-br from-gray-900 via-indigo-900 to-amber-900 text-white shadow-lg">
+        <div class="flex items-start justify-between gap-6">
+          <div class="flex-1">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="px-2 py-0.5 bg-amber-400 text-gray-900 rounded text-xs font-bold">NEW</span>
+              <span class="text-amber-200 text-xs uppercase tracking-wider">Progressive certainty engine</span>
+            </div>
+            <h2 class="text-2xl font-bold mb-1">Agentic STM Composer</h2>
+            <p class="text-gray-300 text-sm mb-3 max-w-2xl">
+              Six-layer reasoning pipeline — Intent → Metadata → Semantic Mapping → Transformation → Validation → Build —
+              with two human governance gates, multi-dialect source probing, and live SSE progress.
+            </p>
+            <div class="flex flex-wrap gap-2 text-xs">
+              <span class="px-2 py-1 bg-white/10 rounded">L1 Intent</span>
+              <span class="px-2 py-1 bg-white/10 rounded">L2 Metadata</span>
+              <span class="px-2 py-1 bg-amber-400/30 rounded text-amber-100">Gate 1</span>
+              <span class="px-2 py-1 bg-white/10 rounded">L3 Mapping</span>
+              <span class="px-2 py-1 bg-white/10 rounded">L4 Transform</span>
+              <span class="px-2 py-1 bg-white/10 rounded">L5 Validate</span>
+              <span class="px-2 py-1 bg-amber-400/30 rounded text-amber-100">Gate 2</span>
+              <span class="px-2 py-1 bg-white/10 rounded">L6 Build</span>
+            </div>
+          </div>
+          <div class="flex flex-col gap-2 flex-shrink-0">
+            <a href="/mapping_compose_react.html?mode=agentic"
+               class="px-5 py-2.5 bg-amber-400 text-gray-900 font-semibold rounded-lg hover:bg-amber-300 transition text-sm whitespace-nowrap">
+              Start agentic session →
+            </a>
+            <a href="/mapping_compose_react.html"
+               class="px-5 py-2 border border-white/20 text-white/80 hover:bg-white/5 rounded-lg text-sm text-center whitespace-nowrap">
+              Rule-based composer
+            </a>
+          </div>
+        </div>
+      </div>
 
       <!-- Recent runs -->
       <div class="card">
