@@ -110,6 +110,7 @@ async def test_start_session_creates_db_row(tmp_db):
         bb, raw_input="load customers",
         intent_source="freetext",
         llm=_intent_llm(),
+        config={"gates_enabled": False},
     )
     await _wait_for_pipeline("sess-create-test")
     loaded = await load_blackboard("sess-create-test")
@@ -123,6 +124,7 @@ async def test_pipeline_runs_to_done(tmp_db):
         bb, raw_input="load customers",
         intent_source="freetext",
         llm=_intent_llm(),
+        config={"gates_enabled": False},
     )
     await _wait_for_pipeline("sess-done-test")
 
@@ -151,6 +153,7 @@ async def test_pipeline_emits_sse_events(tmp_db):
         bb, raw_input="load customers",
         intent_source="freetext",
         llm=_intent_llm(),
+        config={"gates_enabled": False},
     )
 
     # Wait for pipeline to complete (broker.close() signals reader)
@@ -173,6 +176,7 @@ async def test_pipeline_events_logged_to_db(tmp_db):
         bb, raw_input="load customers",
         intent_source="freetext",
         llm=_intent_llm(),
+        config={"gates_enabled": False},
     )
     await _wait_for_pipeline("sess-events-test")
 
@@ -190,6 +194,7 @@ async def test_is_running_clears_after_completion(tmp_db):
         bb, raw_input="load customers",
         intent_source="freetext",
         llm=_intent_llm(),
+        config={"gates_enabled": False},
     )
     # Should be running immediately after start
     assert is_running("sess-running-test")
