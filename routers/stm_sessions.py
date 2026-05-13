@@ -23,7 +23,7 @@ from core.stm.blackboard import (
 )
 from core.stm.coordinator import decide_gate, is_running, start_session
 from core.stm.events import get_broker
-from core.stm.persistence import list_events, load_blackboard
+from core.stm.persistence import get_session_status, list_events, load_blackboard
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/stm/sessions", tags=["stm-sessions"])
@@ -56,17 +56,18 @@ class SessionSummary(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _bb_summary(bb: StmBlackboard) -> SessionSummary:
+async def _bb_summary(bb: StmBlackboard) -> SessionSummary:
+    db_status = await get_session_status(bb.session_id) or "running"
     return SessionSummary(
         session_id=bb.session_id,
-        status=bb.stm_result.get("status") if bb.stm_result else "running",
+        status=db_status,
         current_stage=bb.current_stage,
         target_table=bb.target_table,
         target_dataset=bb.target_dataset,
         source_profiles=bb.selected_source_profiles,
         intent_entity=bb.intent.entity or None,
         intent_status=bb.intent.status.value if bb.intent else None,
-        overall_band=bb.validation.overall_band if bb.validation else None,
+        overall_band=bb.validation.overall_band if (bb.validation and bb.validation.scores) else None,
         stm_result_available=bb.stm_result is not None,
         is_running=is_running(bb.session_id),
     )
@@ -128,7 +129,17 @@ async def get_session(session_id: str) -> SessionSummary:
         bb = await load_blackboard(session_id)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
-    return _bb_summary(bb)
+    return await _bb_summary(bb)
+
+
+@router.get("/{session_id}/blackboard")
+async def get_blackboard(session_id: str) -> Dict[str, Any]:
+    """Return the full blackboard so the UI can render per-stage artifacts."""
+    try:
+        bb = await load_blackboard(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
+    return bb.model_dump(mode="json")
 
 
 @router.get("/{session_id}/events")

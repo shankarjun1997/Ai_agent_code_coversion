@@ -905,6 +905,11 @@ body::before {
   margin: 24px 0;
 }
 .gate-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.gate-preview { margin-bottom: 16px; }
+.gate-preview-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--amber); margin-bottom: 6px; font-weight: 600;
+}
 .gate-title { font-weight: 600; color: var(--amber); font-size: 16px; }
 .gate-sub { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
 
@@ -1613,7 +1618,7 @@ function StageRow({ stage, status, duration, model, onExpand, expanded, artifact
   );
 }
 
-function GatePanel({ sessionId, gateName, stage, onDecided }) {
+function GatePanel({ sessionId, gateName, stage, blackboard, onDecided }) {
   const [reviewer, setReviewer] = useState("");
   const [notes, setNotes] = useState("");
   const [refineTarget, setRefineTarget] = useState(stage === "L2" ? "L2" : "L3");
@@ -1649,18 +1654,38 @@ function GatePanel({ sessionId, gateName, stage, onDecided }) {
 
   const validTargets = stage === "L2" ? ["L1","L2"] : ["L1","L2","L3","L4","L5"];
 
+  // Show the relevant artifact for this gate so reviewers know what they're approving
+  let preview = null;
+  if (blackboard) {
+    if (gateName === "gate1_metadata") {
+      const m = blackboard.metadata_graph || {};
+      preview = summarizeArtifact("L2", m);
+    } else if (gateName === "gate2_validation") {
+      const v = blackboard.validation || {};
+      preview = summarizeArtifact("L5", v);
+    }
+  }
+
   return (
     <div className="gate-panel">
       <div className="gate-head">
         <span className="gate-title">Gate review · {gateName}</span>
         <span className="gate-sub">awaiting decision</span>
       </div>
+      {preview && (
+        <div className="gate-preview">
+          <div className="gate-preview-label">
+            {gateName === "gate1_metadata" ? "Metadata graph to approve" : "Validation report to approve"}
+          </div>
+          <pre className="stage-body" style={{margin:0, maxHeight:"260px"}}>{JSON.stringify(preview, null, 2)}</pre>
+        </div>
+      )}
       <label className="modal-field">
-        <span>Reviewer</span>
-        <input value={reviewer} placeholder="your name / email" onChange={e => setReviewer(e.target.value)}/>
+        <span>Reviewer <span style={{textTransform:"none",letterSpacing:0,color:"var(--text-faint)"}}>(optional)</span></span>
+        <input value={reviewer} placeholder="leave blank or add your name" onChange={e => setReviewer(e.target.value)}/>
       </label>
       <label className="modal-field">
-        <span>Notes</span>
+        <span>Notes <span style={{textTransform:"none",letterSpacing:0,color:"var(--text-faint)"}}>(optional)</span></span>
         <textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional context"/>
       </label>
 
@@ -1702,27 +1727,116 @@ function GatePanel({ sessionId, gateName, stage, onDecided }) {
   );
 }
 
+// Map each stage to the blackboard slice it owns
+const STAGE_ARTIFACT_KEY = {
+  L1: "intent",
+  L2: "metadata_graph",
+  L3: "candidate_mappings",
+  L4: "transformations",
+  L5: "validation",
+  L6: "stm_result",
+};
+
+function summarizeArtifact(stage, artifact) {
+  if (!artifact) return null;
+  if (stage === "L1") {
+    return {
+      entity: artifact.entity,
+      action: artifact.action,
+      grain: artifact.grain,
+      slas: artifact.slas,
+      keywords: artifact.keywords,
+      confidence: artifact.confidence,
+    };
+  }
+  if (stage === "L2") {
+    return {
+      sources_probed: (artifact.sources || []).map(s => ({
+        profile: s.profile_id, dialect: s.dialect, tables: (s.tables || []).length
+      })),
+      edges: (artifact.edges || []).length,
+      tables: (artifact.tables || []).length,
+    };
+  }
+  if (stage === "L3") {
+    return {
+      target_table: artifact.target_table,
+      mappings: (artifact.mappings || []).map(m => ({
+        target: m.target_column,
+        source: m.source_column ? `${m.source_table}.${m.source_column}` : "(derived)",
+        confidence: m.confidence,
+        rule_match: m.rule_match,
+      })),
+    };
+  }
+  if (stage === "L4") {
+    return {
+      scd_type: artifact.scd_type,
+      partition_field: artifact.partition_field,
+      idempotency_key: artifact.idempotency_key,
+      audit_columns: artifact.audit_columns,
+      derived: (artifact.derived_columns || []).length,
+    };
+  }
+  if (stage === "L5") {
+    return {
+      overall_band: artifact.overall_band,
+      low_confidence_count: artifact.low_confidence_count,
+      block_count: artifact.block_count,
+      findings: (artifact.findings || []).slice(0, 12),
+    };
+  }
+  if (stage === "L6") {
+    return {
+      stm_id: artifact.stm_id,
+      field_count: artifact.field_count,
+      pii_count: artifact.pii_count,
+      generated_at: artifact.generated_at,
+    };
+  }
+  return artifact;
+}
+
 function AgenticSession({ sessionId, onReset }) {
   const [summary, setSummary]               = useState(null);
   const [stages, setStages]                 = useState({});  // {L1: {status, duration_ms, llm_model}, ...}
-  const [artifacts, setArtifacts]           = useState({});  // {L1: {...}, ...}
+  const [blackboard, setBlackboard]         = useState(null); // full bb for artifact display
   const [activeGate, setActiveGate]         = useState(null); // {gate, stage}
   const [expanded, setExpanded]             = useState(null);
   const [streamErr, setStreamErr]           = useState(null);
   const [terminal, setTerminal]             = useState(null); // "done" | "failed" | "rejected"
 
-  // Poll summary periodically
+  const loadBlackboard = () => {
+    fetch(`${API_BASE}/api/stm/sessions/${sessionId}/blackboard`)
+      .then(r => r.ok ? r.json() : null)
+      .then(bb => { if (bb) setBlackboard(bb); })
+      .catch(() => {});
+  };
+
+  // Poll summary periodically — also derives gate panel state when SSE missed it
   useEffect(() => {
     const refresh = () => {
       fetch(`${API_BASE}/api/stm/sessions/${sessionId}`)
         .then(r => r.ok ? r.json() : null)
-        .then(s => { if (s) setSummary(s); })
+        .then(s => {
+          if (!s) return;
+          setSummary(s);
+          if (s.status === "awaiting_review" && !activeGate) {
+            // Infer gate from the stage we're stalled at
+            const gate = GATE_AT[s.current_stage] || (s.current_stage === "L3" ? "gate1_metadata" : null);
+            const stage = s.current_stage === "L3" ? "L2" : s.current_stage;
+            if (gate) setActiveGate({ gate, stage });
+          }
+        })
         .catch(() => {});
     };
     refresh();
     const id = setInterval(refresh, 2500);
     return () => clearInterval(id);
-  }, [sessionId]);
+  }, [sessionId, activeGate]);
+
+  // Initial blackboard load
+  useEffect(() => { loadBlackboard(); }, [sessionId]);
 
   // Subscribe to SSE
   useEffect(() => {
@@ -1738,15 +1852,18 @@ function AgenticSession({ sessionId, onReset }) {
           setStages(prev => ({ ...prev, [stage]: { ...(prev[stage]||{}), status: "running" } }));
         } else if (kind === "stage_ready" && stage) {
           setStages(prev => ({ ...prev, [stage]: { ...(prev[stage]||{}), status: "ready", duration_ms: data.duration_ms, llm_model: data.llm_model } }));
+          loadBlackboard();
         } else if (kind === "stage_failed" && stage) {
           setStages(prev => ({ ...prev, [stage]: { ...(prev[stage]||{}), status: "failed", error: data.error } }));
         } else if (kind === "gate_waiting") {
           setActiveGate({ gate: data.gate, stage });
           setStages(prev => ({ ...prev, [stage]: { ...(prev[stage]||{}), status: "waiting" } }));
+          loadBlackboard();
         } else if (kind === "gate_decided") {
           setActiveGate(null);
+          loadBlackboard();
         } else if (kind === "session_done") {
-          setTerminal("done"); es.close();
+          setTerminal("done"); loadBlackboard(); es.close();
         } else if (kind === "session_failed") {
           setTerminal(data.reason === "gate_rejected" ? "rejected" : "failed"); es.close();
         }
@@ -1793,18 +1910,22 @@ function AgenticSession({ sessionId, onReset }) {
       </div>
 
       <div className="stepper">
-        {STAGES.map(s => (
-          <StageRow
-            key={s}
-            stage={s}
-            status={stages[s]?.status || (summary && STAGES.indexOf(summary.current_stage) > STAGES.indexOf(s) ? "ready" : "pending")}
-            duration={stages[s]?.duration_ms}
-            model={stages[s]?.llm_model}
-            expanded={expanded === s}
-            onExpand={() => setExpanded(prev => prev === s ? null : s)}
-            artifact={artifacts[s]}
-          />
-        ))}
+        {STAGES.map(s => {
+          const key = STAGE_ARTIFACT_KEY[s];
+          const raw = blackboard ? blackboard[key] : null;
+          return (
+            <StageRow
+              key={s}
+              stage={s}
+              status={stages[s]?.status || (summary && STAGES.indexOf(summary.current_stage) > STAGES.indexOf(s) ? "ready" : "pending")}
+              duration={stages[s]?.duration_ms}
+              model={stages[s]?.llm_model}
+              expanded={expanded === s}
+              onExpand={() => setExpanded(prev => prev === s ? null : s)}
+              artifact={summarizeArtifact(s, raw)}
+            />
+          );
+        })}
       </div>
 
       {activeGate && (
@@ -1812,6 +1933,7 @@ function AgenticSession({ sessionId, onReset }) {
           sessionId={sessionId}
           gateName={activeGate.gate}
           stage={activeGate.stage}
+          blackboard={blackboard}
           onDecided={(d) => setActiveGate(null)}
         />
       )}
