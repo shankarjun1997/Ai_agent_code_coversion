@@ -105,3 +105,78 @@ async def list_columns(profile_id: str, schema: str, table: str) -> Dict[str, An
         return {"columns": [], "illustrative": True}
     cols = await PostgresProvider(p.dsn).get_columns(schema, table)
     return {"columns": cols, "illustrative": False}
+
+
+# ---------------------------------------------------------------------------
+# Per-dialect profile registration endpoints
+# ---------------------------------------------------------------------------
+
+import uuid as _uuid
+from core.discovery.credentials import encrypt as _encrypt
+from core.discovery.profiles import ConnectionProfile as _ConnectionProfile
+
+
+class _OracleIn(BaseModel):
+    label: str
+    dsn: str
+    user: str | None = None
+    password: str | None = None
+
+
+class _MySQLIn(BaseModel):
+    label: str
+    host: str
+    port: int = 3306
+    db: str
+    user: str
+    password: str
+
+
+class _MSSQLIn(BaseModel):
+    label: str
+    host: str
+    port: int = 1433
+    db: str
+    user: str
+    password: str
+
+
+class _BQIn(BaseModel):
+    label: str
+    project_id: str
+    credentials_json: str | None = None
+
+
+def _register_profile(dialect: str, label: str, dsn: str, host: str, creds: dict | None) -> dict:
+    reg = get_registry()
+    pid = f"{dialect[:2]}-{_uuid.uuid4().hex[:8]}"
+    p = _ConnectionProfile(
+        id=pid, label=label, dialect=dialect, dsn=dsn, host=host,
+        encrypted_credentials=_encrypt(creds) if creds else None,
+    )
+    reg.register(p)
+    return {"id": p.id, "label": p.label, "dialect": p.dialect, "host": p.host}
+
+
+@router.post("/profiles/oracle")
+async def post_oracle(body: _OracleIn) -> dict:
+    creds = {"user": body.user, "password": body.password} if body.user else None
+    return _register_profile("oracle", body.label, body.dsn, body.dsn, creds)
+
+
+@router.post("/profiles/mysql")
+async def post_mysql(body: _MySQLIn) -> dict:
+    dsn = f"mysql://{body.user}:{body.password}@{body.host}:{body.port}/{body.db}"
+    return _register_profile("mysql", body.label, dsn, f"{body.host}:{body.port}", {"user": body.user, "password": body.password})
+
+
+@router.post("/profiles/mssql")
+async def post_mssql(body: _MSSQLIn) -> dict:
+    dsn = f"mssql://{body.user}:{body.password}@{body.host}:{body.port}/{body.db}"
+    return _register_profile("mssql", body.label, dsn, f"{body.host}:{body.port}", {"user": body.user, "password": body.password})
+
+
+@router.post("/profiles/bigquery")
+async def post_bigquery(body: _BQIn) -> dict:
+    creds = {"credentials_json": body.credentials_json} if body.credentials_json else None
+    return _register_profile("bigquery", body.label, body.project_id, "bigquery", creds)

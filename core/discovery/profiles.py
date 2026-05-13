@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Dict, List, Optional
 
 
@@ -17,6 +18,9 @@ class ConnectionProfile:
     last_used: Optional[str] = None
     icon:     str = "DB"
     status:   str = "connected"
+    encrypted_credentials: Optional[bytes] = None
+    last_ping: Optional[datetime] = None
+    last_ping_status: Optional[str] = None
 
 
 class ProfileRegistry:
