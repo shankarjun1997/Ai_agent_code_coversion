@@ -314,6 +314,37 @@ async def list_running_sessions() -> List[Dict[str, Any]]:
     return await asyncio.to_thread(_list_running_sessions_sync)
 
 
+def _find_latest_stm_by_target_sync(
+    target_dataset: str, target_table: str, exclude_session_id: Optional[str] = None,
+) -> Optional[str]:
+    """Return the session_id of the most recently completed STM for this target,
+    or None if none exist. Used by Phase E enhancement detection."""
+    t = _t("stm_sessions")
+    q = (
+        select(t.c.session_id)
+        .where(t.c.target_dataset == target_dataset)
+        .where(t.c.target_table == target_table)
+        .where(t.c.status == "done")
+        .order_by(t.c.updated_at.desc())
+        .limit(5)
+    )
+    with _eng().connect() as conn:
+        rows = conn.execute(q).fetchall()
+    for r in rows:
+        sid = r[0]
+        if sid != exclude_session_id:
+            return sid
+    return None
+
+
+async def find_latest_stm_by_target(
+    target_dataset: str, target_table: str, exclude_session_id: Optional[str] = None,
+) -> Optional[str]:
+    return await asyncio.to_thread(
+        _find_latest_stm_by_target_sync, target_dataset, target_table, exclude_session_id,
+    )
+
+
 def reset_engine_for_tests() -> None:
     global _engine, _meta
     _engine = None

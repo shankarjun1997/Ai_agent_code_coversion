@@ -319,28 +319,50 @@ def _types_compatible(bq_type: str, expected_type: str) -> bool:
 
 # ── Full crawl report ─────────────────────────────────────────────────────────
 
-def crawl_project(project_id: Optional[str] = None) -> Dict[str, Any]:
+def crawl_project(
+    project_id: Optional[str] = None,
+    dataset_filter: Optional[str] = None,
+) -> Dict[str, Any]:
     """
-    Full recursive crawl: all datasets → all tables → schemas.
-    Returns a nested dict for the mapping agent to explore.
+    Full recursive crawl: datasets → tables → schemas.
+
+    Shape:
+        {"datasets": {ds_id: {"tables": {t_id: {type, columns:[{name,type,mode}]}}}}}
+
+    When `dataset_filter` is provided, only that dataset is crawled —
+    essential for large projects where a full project crawl is too slow.
     """
     report: Dict[str, Any] = {"datasets": {}}
-    datasets = list_datasets(project_id)
+    if dataset_filter:
+        datasets = [{"dataset_id": dataset_filter}]
+    else:
+        datasets = list_datasets(project_id)
 
     for ds in datasets:
         ds_id = ds["dataset_id"]
-        tables = list_tables(ds_id, project_id)
-        report["datasets"][ds_id] = {}
+        try:
+            tables = list_tables(ds_id, project_id)
+        except Exception as exc:
+            logger.warning("crawl_project: list_tables(%s) failed: %s", ds_id, exc)
+            tables = []
+        ds_block: Dict[str, Any] = {"tables": {}}
         for tbl in tables:
             t_id = tbl["table_id"]
-            schema = get_table_schema(ds_id, t_id, project_id)
-            report["datasets"][ds_id][t_id] = {
+            try:
+                schema = get_table_schema(ds_id, t_id, project_id)
+            except Exception as exc:
+                logger.warning("crawl_project: get_table_schema(%s.%s) failed: %s", ds_id, t_id, exc)
+                schema = []
+            ds_block["tables"][t_id] = {
                 "type":    tbl.get("type", "TABLE"),
-                "columns": [
-                    {"name": c["name"], "type": c.get("type",""), "mode": c.get("mode","")}
+                "schema":  [
+                    {"name": c["name"], "type": c.get("type", ""), "mode": c.get("mode", "")}
                     for c in schema
                 ],
+                "num_rows":      tbl.get("num_rows"),
+                "last_modified": tbl.get("last_modified"),
             }
+        report["datasets"][ds_id] = ds_block
         logger.info("Crawled dataset %s: %d tables", ds_id, len(tables))
 
     return report

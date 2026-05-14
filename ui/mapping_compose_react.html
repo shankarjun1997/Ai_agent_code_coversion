@@ -920,7 +920,41 @@ body::before {
 }
 .text-rose { color: var(--rose); font-size: 14px; }
 .text-dim { color: var(--text-dim); }
+.graph-toolbar { display:flex; gap:8px; align-items:center; padding:6px 8px; border-bottom:1px solid var(--border); font-size:12px; }
+.graph-toolbar button { padding:4px 10px; border:1px solid var(--border); background:#fff; border-radius:4px; cursor:pointer; }
+.graph-toolbar button.on { background:#1f2937; color:#fff; border-color:#1f2937; }
+.graph-canvas { width:100%; height:420px; background:#fafafa; border-bottom-left-radius:6px; border-bottom-right-radius:6px; }
+.graph-side { padding:10px 12px; background:#f8fafc; border-top:1px solid var(--border); font-size:12px; }
+.materialize-card { padding:12px; background:#f0fdf4; border:1px solid #86efac; border-radius:8px; margin-top:10px; font-size:13px; }
+.materialize-card pre { background:#fff; border-radius:4px; padding:8px; font-size:11px; max-height:160px; overflow:auto; margin:8px 0; }
+.materialize-card.success { background:#ecfdf5; }
+.materialize-card.error   { background:#fef2f2; border-color:#fca5a5; }
+.target-card { background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:10px; margin:8px 0; font-size:12px; }
+.target-card h4 { margin:0 0 6px 0; font-size:13px; }
+.target-card .tbl-list { display:flex; flex-wrap:wrap; gap:6px; }
+.target-card .tbl-pill { background:#fff; border:1px solid #93c5fd; border-radius:9999px; padding:2px 8px; font-family:monospace; font-size:11px; }
+.enhance-badge { background:#fff7ed; color:#9a3412; border:1px solid #fdba74; padding:3px 10px; border-radius:9999px; font-size:11px; font-weight:600; }
+.g1-section { border:1px solid var(--border); border-radius:6px; margin-bottom:10px; background:#fff; }
+.g1-section > summary { padding:8px 12px; cursor:pointer; font-weight:600; font-size:13px; user-select:none; list-style:none; display:flex; align-items:center; justify-content:space-between; }
+.g1-section > summary::-webkit-details-marker { display:none; }
+.g1-section > summary::after { content:"▾"; color:#94a3b8; font-size:11px; }
+.g1-section[open] > summary::after { content:"▴"; }
+.g1-section .g1-body { padding:0 12px 12px; }
+.g1-table { width:100%; border-collapse:collapse; font-size:12px; }
+.g1-table th, .g1-table td { padding:5px 8px; text-align:left; border-bottom:1px solid #f1f5f9; vertical-align:top; }
+.g1-table th { background:#f8fafc; color:#475569; font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+.g1-table tbody tr:hover { background:#fafafa; }
+.g1-chip { display:inline-block; padding:1px 7px; border-radius:9999px; background:#e2e8f0; color:#0f172a; font-family:monospace; font-size:11px; margin:1px 3px 1px 0; }
+.g1-chip-sev-info  { background:#dbeafe; color:#1e40af; }
+.g1-chip-sev-warn  { background:#fef3c7; color:#92400e; }
+.g1-chip-sev-block { background:#fee2e2; color:#991b1b; }
+.g1-bar { display:inline-block; width:60px; height:6px; background:#e5e7eb; border-radius:3px; vertical-align:middle; margin-right:6px; overflow:hidden; }
+.g1-bar > span { display:block; height:100%; background:#7c3aed; }
+.g1-meta { color:#64748b; font-size:11px; margin-top:2px; }
+.g1-pass { color:#059669; font-weight:600; }
+.g1-fail { color:#dc2626; font-weight:600; }
 </style>
+<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -1493,6 +1527,8 @@ const STAGE_LABELS = {
 const STAGES = ["L1","L2","L3","L4","L5","L6"];
 const GATE_AT = { L2: "gate1_metadata", L5: "gate2_validation" };
 
+const ENHANCE_RE = /\b(add|append|extend|new column|enhance|update existing|alter)\b/i;
+
 function SessionCreateModal({ profiles, onClose, onCreated }) {
   const [target, setTarget] = useState({ table: "fact_customer_360", dataset: "analytics_warehouse" });
   const [selectedProfiles, setSelectedProfiles] = useState(() => {
@@ -1502,15 +1538,26 @@ function SessionCreateModal({ profiles, onClose, onCreated }) {
   const [rawInput, setRawInput] = useState("Load customer 360 dimension from CRM into BigQuery warehouse");
   const [intentSource, setIntentSource] = useState("freetext");
   const [jiraKey, setJiraKey] = useState("");
+  const [attachments, setAttachments] = useState([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [progress, setProgress] = useState("");
+
+  const isEnhance = ENHANCE_RE.test(rawInput);
 
   const toggleProfile = (id) =>
     setSelectedProfiles(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
 
+  const onPickFiles = (files) => {
+    const arr = Array.from(files || []);
+    setAttachments(prev => [...prev, ...arr]);
+  };
+  const removeFile = (idx) => setAttachments(prev => prev.filter((_, i) => i !== idx));
+
   const submit = async () => {
     setBusy(true); setErr(null);
     try {
+      const hasFiles = attachments.length > 0;
       const body = {
         target_table: target.table,
         target_dataset: target.dataset,
@@ -1518,7 +1565,9 @@ function SessionCreateModal({ profiles, onClose, onCreated }) {
         raw_input: rawInput,
         intent_source: intentSource,
         jira_issue_key: intentSource === "jira" ? jiraKey : null,
+        pause_for_attachments: hasFiles,
       };
+      setProgress("Creating session...");
       const res = await fetch(`${API_BASE}/api/stm/sessions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1529,11 +1578,24 @@ function SessionCreateModal({ profiles, onClose, onCreated }) {
         throw new Error(`${res.status}: ${detail}`);
       }
       const data = await res.json();
-      onCreated(data.session_id);
+      const sid = data.session_id;
+      if (hasFiles) {
+        for (let i = 0; i < attachments.length; i++) {
+          setProgress(`Uploading ${i+1}/${attachments.length}: ${attachments[i].name}`);
+          const fd = new FormData();
+          fd.append("file", attachments[i]);
+          const up = await fetch(`${API_BASE}/api/stm/sessions/${sid}/attachments`, { method: "POST", body: fd });
+          if (!up.ok) throw new Error(`Upload of ${attachments[i].name} failed: ${up.status}`);
+        }
+        setProgress("Starting pipeline...");
+        await fetch(`${API_BASE}/api/stm/sessions/${sid}/start`, { method: "POST" });
+      }
+      onCreated(sid);
     } catch (e) {
       setErr(e.message);
     } finally {
       setBusy(false);
+      setProgress("");
     }
   };
 
@@ -1585,12 +1647,44 @@ function SessionCreateModal({ profiles, onClose, onCreated }) {
           <textarea rows={4} value={rawInput} onChange={e => setRawInput(e.target.value)}/>
         </label>
 
+        {isEnhance && (
+          <div className="banner" style={{background:"#fff7ed", color:"#9a3412", border:"1px solid #fdba74", padding:"8px 12px", borderRadius:"8px", marginBottom:"12px", fontSize:"13px"}}>
+            Detected an enhancement intent for <strong>{target.dataset}.{target.table}</strong>. L1 will check for a prior STM and only rewrite changed fields.
+          </div>
+        )}
+
+        <div className="modal-field">
+          <span>Attachments <span style={{textTransform:"none",letterSpacing:0,color:"var(--text-faint)"}}>(CSV / PDF / DOCX — optional)</span></span>
+          <div
+            onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
+            onDrop={e => { e.preventDefault(); e.stopPropagation(); onPickFiles(e.dataTransfer.files); }}
+            style={{border:"1px dashed #cbd5e1", borderRadius:"8px", padding:"12px", textAlign:"center", background:"#f8fafc", cursor:"pointer"}}
+            onClick={() => document.getElementById("stm-file-input").click()}
+          >
+            <div style={{fontSize:"13px", color:"#475569"}}>Drop files here or click to browse</div>
+            <input id="stm-file-input" type="file" multiple style={{display:"none"}}
+                   accept=".csv,.tsv,.pdf,.docx,.doc,.txt,.md"
+                   onChange={e => onPickFiles(e.target.files)}/>
+          </div>
+          {attachments.length > 0 && (
+            <div style={{marginTop:"8px"}}>
+              {attachments.map((f, i) => (
+                <div key={i} style={{display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:"12px", padding:"4px 8px", background:"#f1f5f9", borderRadius:"4px", marginBottom:"4px"}}>
+                  <span style={{fontFamily:"monospace"}}>{f.name} <span style={{color:"#94a3b8"}}>({Math.round(f.size/1024)} KB)</span></span>
+                  <button onClick={() => removeFile(i)} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:"14px"}}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {err && <div className="banner banner-error">{err}</div>}
+        {progress && <div className="banner" style={{background:"#eff6ff", color:"#1e40af", padding:"8px 12px", borderRadius:"8px", marginBottom:"8px"}}>{progress}</div>}
 
         <div className="modal-actions">
           <button className="btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
           <button className="btn-primary" onClick={submit} disabled={busy || !selectedProfiles.length || !rawInput.trim()}>
-            {busy ? "Starting..." : "Start session"}
+            {busy ? "Starting..." : `Start session${attachments.length ? ` (with ${attachments.length} file${attachments.length>1?'s':''})` : ""}`}
           </button>
         </div>
       </div>
@@ -1618,6 +1712,242 @@ function StageRow({ stage, status, duration, model, onExpand, expanded, artifact
   );
 }
 
+// ── Gate 1 review table (6 sections) ────────────────────────────────
+function Gate1ReviewTable({ blackboard, droppedTables, onToggleTable }) {
+  if (!blackboard) return <div style={{padding:"10px", color:"#94a3b8"}}>Loading session state…</div>;
+  const intent      = blackboard.intent || {};
+  const attachments = blackboard.attachments || [];
+  const graph       = blackboard.metadata_graph || {};
+  const tg          = blackboard.target_graph || null;
+  const profCov     = graph.profile_coverage || {};
+  const tableScores = graph.table_scores || [];
+  const notes       = graph.coverage_notes || [];
+
+  // ── Section 3: profiles probed (counts derived from nodes) ────────────
+  const profileStats = {};
+  (graph.nodes || []).forEach(n => {
+    const pid = n.id.split(".")[0];
+    if (!profileStats[pid]) profileStats[pid] = { dialect: n.dialect||"unknown", schemas:new Set(), tables:0, columns:0 };
+    if (n.kind === "schema") profileStats[pid].schemas.add(n.id);
+    if (n.kind === "table")  profileStats[pid].tables  += 1;
+    if (n.kind === "column") profileStats[pid].columns += 1;
+  });
+  const fkCount = {};
+  (graph.edges || []).forEach(e => {
+    if (e.kind === "fk") {
+      const pid = e.src.split(".")[0];
+      fkCount[pid] = (fkCount[pid] || 0) + 1;
+    }
+  });
+
+  // ── Section 6: parse severity prefix ──────────────────────────────────
+  const parseNote = (raw) => {
+    const m = /^(info|warn|block):(.*)$/i.exec(raw);
+    if (m) return { sev: m[1].toLowerCase(), msg: m[2].trim() };
+    return { sev: "info", msg: raw };
+  };
+  const parsedNotes = notes.map(parseNote);
+  const sevCount = parsedNotes.reduce((acc, n) => { acc[n.sev] = (acc[n.sev]||0)+1; return acc; }, {});
+
+  return (
+    <div style={{marginTop:"6px"}}>
+      {/* 1. Intent summary */}
+      <details className="g1-section" open>
+        <summary>1. Intent summary <span style={{color:"#94a3b8",fontWeight:400,fontSize:11}}>(L1)</span></summary>
+        <div className="g1-body">
+          <table className="g1-table"><tbody>
+            <tr><th style={{width:"30%"}}>Entity</th><td>{intent.entity || <em style={{color:"#94a3b8"}}>(unset)</em>}</td></tr>
+            <tr><th>Action</th><td>{intent.action || "—"}</td></tr>
+            <tr><th>Table type</th><td>
+              {intent.is_dimension && <span className="g1-chip">dimension</span>}
+              {intent.is_fact && <span className="g1-chip">fact</span>}
+              {intent.scd_hint && <span className="g1-chip">SCD: {intent.scd_hint}</span>}
+              {!intent.is_dimension && !intent.is_fact && "—"}
+            </td></tr>
+            <tr><th>Grain</th><td>{intent.grain_hint || "—"}</td></tr>
+            <tr><th>Filters</th><td>
+              {(intent.filters||[]).length
+                ? intent.filters.map((f,i) => <span key={i} className="g1-chip">{f}</span>)
+                : "—"}
+            </td></tr>
+            <tr><th>Keywords</th><td>
+              {(intent.extracted_keywords||[]).length
+                ? intent.extracted_keywords.map((k,i)=> <span key={i} className="g1-chip">{k}</span>)
+                : "—"}
+            </td></tr>
+            <tr><th>Intent kind</th><td>
+              {intent.intent_kind === "enhance_existing"
+                ? <><span className="g1-chip" style={{background:"#fed7aa",color:"#9a3412"}}>ENHANCING</span>
+                    <span style={{fontFamily:"monospace",marginLeft:6}}>{intent.baseline_stm_id || "?"}</span></>
+                : <span className="g1-chip">NEW</span>}
+            </td></tr>
+            <tr><th>Source</th><td>
+              {intent.source === "jira"
+                ? <>jira · <code>{intent.jira_issue_key || "?"}</code></>
+                : "free-text"}
+            </td></tr>
+          </tbody></table>
+        </div>
+      </details>
+
+      {/* 2. Inputs ingested */}
+      <details className="g1-section" open={attachments.length > 0}>
+        <summary>2. Inputs ingested <span style={{color:"#94a3b8",fontWeight:400,fontSize:11}}>({attachments.length} attachment{attachments.length===1?"":"s"})</span></summary>
+        <div className="g1-body">
+          {(intent.jira_issue_key || attachments.length > 0) ? (
+            <table className="g1-table">
+              <thead><tr><th>Source</th><th>Kind</th><th>What was extracted</th><th>Status</th></tr></thead>
+              <tbody>
+                {intent.jira_issue_key && (
+                  <tr>
+                    <td><code>{intent.jira_issue_key}</code></td>
+                    <td>jira story</td>
+                    <td>summary + description appended to raw_input</td>
+                    <td className="g1-pass">✓</td>
+                  </tr>
+                )}
+                {attachments.map(a => (
+                  <tr key={a.id}>
+                    <td><code>{a.filename}</code></td>
+                    <td>{a.kind} ({Math.max(1, Math.round((a.bytes||0)/1024))} KB)</td>
+                    <td>
+                      {a.kind === "csv" && a.csv_schema
+                        ? `${(a.csv_schema.columns||[]).length} cols inferred (${(a.csv_schema.row_sample_count||0)} rows sampled)`
+                        : `${(a.text_excerpt||"").length} chars text excerpt`}
+                    </td>
+                    <td className="g1-pass">✓</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div style={{color:"#94a3b8",fontSize:12}}>No attachments uploaded; intent came from free-text only.</div>
+          )}
+        </div>
+      </details>
+
+      {/* 3. Profiles probed */}
+      <details className="g1-section" open>
+        <summary>3. Source discovery — profiles probed</summary>
+        <div className="g1-body">
+          <table className="g1-table">
+            <thead><tr><th>Profile</th><th>Dialect</th><th>Method</th><th>Schemas</th><th>Tables</th><th>Columns</th><th>FKs</th></tr></thead>
+            <tbody>
+              {Object.entries(profileStats).map(([pid, st]) => (
+                <tr key={pid}>
+                  <td><code>{pid}</code></td>
+                  <td>{st.dialect}</td>
+                  <td><span className="g1-chip">{profCov[pid] || "—"}</span></td>
+                  <td>{st.schemas.size}</td>
+                  <td>{st.tables}</td>
+                  <td>{st.columns}</td>
+                  <td>{fkCount[pid] || 0}</td>
+                </tr>
+              ))}
+              {Object.keys(profileStats).length === 0 && (
+                <tr><td colSpan={7} style={{color:"#94a3b8"}}>No profiles probed yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </details>
+
+      {/* 4. Source tables — actionable picker */}
+      <details className="g1-section" open>
+        <summary>4. Source tables identified <span style={{color:"#94a3b8",fontWeight:400,fontSize:11}}>(tick to confirm scope)</span></summary>
+        <div className="g1-body">
+          {tableScores.length === 0 ? (
+            <div style={{color:"#94a3b8",fontSize:12}}>No table scores available — L2 may have failed or sources empty.</div>
+          ) : (
+            <table className="g1-table">
+              <thead><tr><th style={{width:"24px"}}>✓</th><th>Table</th><th>Dialect</th><th>Score</th><th>Why it matched</th><th>Cols hit</th><th>Rows</th></tr></thead>
+              <tbody>
+                {tableScores.slice(0, 15).map(t => {
+                  const dropped = droppedTables.has(t.table_id);
+                  return (
+                    <tr key={t.table_id} style={dropped ? {opacity:.4} : null}>
+                      <td><input type="checkbox" checked={!dropped} onChange={() => onToggleTable(t.table_id)}/></td>
+                      <td><code>{t.label}</code><div className="g1-meta">{t.table_id}</div></td>
+                      <td>{t.dialect}</td>
+                      <td>
+                        <span className="g1-bar"><span style={{width:`${Math.round(t.score*100)}%`}}/></span>
+                        <span style={{fontFamily:"monospace",fontSize:11}}>{t.score.toFixed(2)}</span>
+                      </td>
+                      <td style={{maxWidth:"260px"}}>{(t.evidence||[]).join(" · ") || "—"}</td>
+                      <td>{t.column_hits || 0}</td>
+                      <td>{t.row_estimate ?? "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+          {droppedTables.size > 0 && (
+            <div style={{marginTop:"6px",fontSize:11,color:"#9a3412"}}>
+              {droppedTables.size} table{droppedTables.size===1?"":"s"} will be dropped on Approve (sent as refine_feedback to L3).
+            </div>
+          )}
+        </div>
+      </details>
+
+      {/* 5. Target confirmation */}
+      <details className="g1-section" open={!!tg}>
+        <summary>5. Target confirmation</summary>
+        <div className="g1-body">
+          {tg ? (
+            <table className="g1-table">
+              <thead><tr><th>Project</th><th>Dataset</th><th>Table</th><th>Status in BQ</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><code>{tg.project_id || "—"}</code></td>
+                  <td><code>{tg.dataset || "—"}</code></td>
+                  <td><code>{blackboard.target_table}</code></td>
+                  <td>
+                    {(tg.tables||[]).find(t => t.name === blackboard.target_table)
+                      ? <span className="g1-pass">exists ({((tg.tables||[]).find(t => t.name === blackboard.target_table)?.columns||[]).length} cols)</span>
+                      : <em style={{color:"#9a3412"}}>does not exist yet — will be created via Materialize after Gate 2</em>}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          ) : (
+            <div style={{color:"#94a3b8",fontSize:12}}>Target graph not populated — BQ crawl may have failed (check coverage notes).</div>
+          )}
+        </div>
+      </details>
+
+      {/* 6. Coverage notes */}
+      <details className="g1-section" open={(sevCount.warn||0)+(sevCount.block||0) > 0}>
+        <summary>
+          6. Coverage notes & resilience flags
+          <span style={{fontWeight:400,fontSize:11,marginLeft:8}}>
+            <span className="g1-chip g1-chip-sev-info">{sevCount.info||0} info</span>
+            <span className="g1-chip g1-chip-sev-warn">{sevCount.warn||0} warn</span>
+            <span className="g1-chip g1-chip-sev-block">{sevCount.block||0} block</span>
+          </span>
+        </summary>
+        <div className="g1-body">
+          {parsedNotes.length === 0 ? (
+            <div style={{color:"#94a3b8",fontSize:12}}>No coverage notes — clean run.</div>
+          ) : (
+            <table className="g1-table">
+              <thead><tr><th style={{width:"60px"}}>Severity</th><th>Note</th></tr></thead>
+              <tbody>
+                {parsedNotes.map((n,i) => (
+                  <tr key={i}>
+                    <td><span className={`g1-chip g1-chip-sev-${n.sev}`}>{n.sev}</span></td>
+                    <td>{n.msg}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </details>
+    </div>
+  );
+}
+
 function GatePanel({ sessionId, gateName, stage, blackboard, onDecided }) {
   const [reviewer, setReviewer] = useState("");
   const [notes, setNotes] = useState("");
@@ -1626,14 +1956,33 @@ function GatePanel({ sessionId, gateName, stage, blackboard, onDecided }) {
   const [mode, setMode] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [droppedTables, setDroppedTables] = useState(() => new Set());
+
+  const toggleTable = (id) => setDroppedTables(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
 
   const submit = async (decision) => {
     setBusy(true); setErr(null);
     try {
       const body = { decision, reviewer: reviewer || null, notes: notes || null };
+      // Gate 1: pass dropped tables as JSON in refine_feedback so L3 can exclude them
+      if (gateName === "gate1_metadata" && droppedTables.size > 0 && decision === "approved") {
+        body.notes = `${body.notes || ""}\n[gate1] dropped_tables=${JSON.stringify(Array.from(droppedTables))}`.trim();
+      }
       if (decision === "refine") {
         body.refine_target = refineTarget;
-        body.refine_feedback = refineFeedback;
+        // For Gate 1 refines, embed dropped-tables as structured JSON so L3 can act on it
+        if (gateName === "gate1_metadata" && droppedTables.size > 0) {
+          body.refine_feedback = JSON.stringify({
+            note: refineFeedback,
+            dropped_tables: Array.from(droppedTables),
+          });
+        } else {
+          body.refine_feedback = refineFeedback;
+        }
       }
       const res = await fetch(`${API_BASE}/api/stm/sessions/${sessionId}/gates/${gateName}`, {
         method: "POST",
@@ -1654,31 +2003,25 @@ function GatePanel({ sessionId, gateName, stage, blackboard, onDecided }) {
 
   const validTargets = stage === "L2" ? ["L1","L2"] : ["L1","L2","L3","L4","L5"];
 
-  // Show the relevant artifact for this gate so reviewers know what they're approving
-  let preview = null;
-  if (blackboard) {
-    if (gateName === "gate1_metadata") {
-      const m = blackboard.metadata_graph || {};
-      preview = summarizeArtifact("L2", m);
-    } else if (gateName === "gate2_validation") {
-      const v = blackboard.validation || {};
-      preview = summarizeArtifact("L5", v);
-    }
-  }
-
   return (
     <div className="gate-panel">
       <div className="gate-head">
         <span className="gate-title">Gate review · {gateName}</span>
         <span className="gate-sub">awaiting decision</span>
       </div>
-      {preview && (
-        <div className="gate-preview">
-          <div className="gate-preview-label">
-            {gateName === "gate1_metadata" ? "Metadata graph to approve" : "Validation report to approve"}
+      {gateName === "gate1_metadata" ? (
+        <Gate1ReviewTable
+          blackboard={blackboard}
+          droppedTables={droppedTables}
+          onToggleTable={toggleTable}
+        />
+      ) : (
+        blackboard && blackboard.validation && (
+          <div className="gate-preview">
+            <div className="gate-preview-label">Validation report to approve</div>
+            <pre className="stage-body" style={{margin:0, maxHeight:"260px"}}>{JSON.stringify(summarizeArtifact("L5", blackboard.validation), null, 2)}</pre>
           </div>
-          <pre className="stage-body" style={{margin:0, maxHeight:"260px"}}>{JSON.stringify(preview, null, 2)}</pre>
-        </div>
+        )
       )}
       <label className="modal-field">
         <span>Reviewer <span style={{textTransform:"none",letterSpacing:0,color:"var(--text-faint)"}}>(optional)</span></span>
@@ -1797,6 +2140,172 @@ function summarizeArtifact(stage, artifact) {
   return artifact;
 }
 
+// ── Knowledge graph (Phase D) ───────────────────────────────────────
+const _CARDINALITY_ARROW = { "1:1":"tee", "M:1":"triangle-tee", "1:M":"triangle", "M:M":"diamond" };
+const _DIALECT_COLOR = { postgres:"#1f6feb", oracle:"#dc2626", mysql:"#0891b2", mssql:"#b45309", bigquery:"#7c3aed", csv:"#0d9488", jira:"#2563eb", concept:"#64748b" };
+
+function GraphView({ graph, mappings }) {
+  const ref = React.useRef(null);
+  const cyRef = React.useRef(null);
+  const [selected, setSelected] = React.useState(null);
+  const [filter, setFilter] = React.useState({ source: true, target: true, csv: true, mappings: true });
+
+  React.useEffect(() => {
+    if (!ref.current || !graph) return;
+    if (!window.cytoscape) return;
+    const nodes = (graph.nodes || [])
+      .filter(n => {
+        if (n.kind === "column") return false; // only show table/schema/dialect for clarity
+        if (n.kind === "dialect") return true;
+        if (n.kind === "schema") return true;
+        if (n.kind === "table") {
+          if (!filter.source && n.dialect !== "bigquery") return false;
+          if (!filter.target && n.dialect === "bigquery") return false;
+          if (!filter.csv && n.dialect === "csv") return false;
+          return true;
+        }
+        return true;
+      })
+      .map(n => ({
+        data: { id: n.id, label: n.label, kind: n.kind, dialect: n.dialect, type: n.data_type },
+        classes: `kind-${n.kind} dialect-${n.dialect||'unknown'}`,
+      }));
+    const nodeIds = new Set(nodes.map(n => n.data.id));
+    const edges = (graph.edges || [])
+      .filter(e => e.kind === "contains" && nodeIds.has(e.src) && nodeIds.has(e.dst))
+      .map((e, i) => ({ data: { id: `e${i}`, source: e.src, target: e.dst, kind: e.kind } }));
+    // Add cross-graph mapping edges from CandidateMappings rows
+    if (filter.mappings && mappings && mappings.rows) {
+      mappings.rows.forEach((m, i) => {
+        if (!m.source_node_ids || !m.source_node_ids.length) return;
+        const srcId = m.source_node_ids[0];
+        // Find the table id for source
+        const srcTable = srcId.split(".").slice(0, -1).join(".");
+        const tgtTable = `bigquery.${mappings.target_dataset}.${mappings.target_table}`;
+        if (nodeIds.has(srcTable) && nodeIds.has(tgtTable)) {
+          edges.push({
+            data: {
+              id: `m${i}`, source: srcTable, target: tgtTable,
+              kind: "mapping", cardinality: m.cardinality || "1:1",
+              field: m.target_field,
+            },
+          });
+        }
+      });
+    }
+    if (cyRef.current) { try { cyRef.current.destroy(); } catch {} }
+    cyRef.current = window.cytoscape({
+      container: ref.current,
+      elements: [...nodes, ...edges],
+      style: [
+        { selector: "node", style: { "label":"data(label)", "font-size":"10px", "text-valign":"center", "color":"#fff", "background-color":(ele)=>_DIALECT_COLOR[ele.data("dialect")]||"#64748b", "width":"label", "height":"label", "padding":"6px", "shape":"round-rectangle" }},
+        { selector: "node.kind-dialect", style: { "background-color":"#0f172a", "font-weight":"bold" }},
+        { selector: "node.kind-schema",  style: { "background-color":"#475569" }},
+        { selector: "edge", style: { "width":1, "line-color":"#94a3b8", "curve-style":"bezier", "target-arrow-shape":"none" }},
+        { selector: "edge[kind = 'mapping']", style: { "line-color":"#a855f7", "width":2, "target-arrow-color":"#a855f7", "target-arrow-shape":(ele)=>_CARDINALITY_ARROW[ele.data("cardinality")]||"triangle", "label":"data(cardinality)", "font-size":"9px", "color":"#a855f7", "text-rotation":"autorotate" }},
+      ],
+      layout: { name: "breadthfirst", directed: true, padding: 14, spacingFactor: 1.1 },
+      wheelSensitivity: 0.2,
+    });
+    cyRef.current.on("tap", "node", (evt) => {
+      const d = evt.target.data();
+      setSelected({ kind: "node", ...d });
+    });
+    cyRef.current.on("tap", "edge", (evt) => {
+      const d = evt.target.data();
+      if (d.kind === "mapping") setSelected({ kind: "edge", ...d });
+    });
+  }, [graph, mappings, filter]);
+
+  React.useEffect(() => () => { if (cyRef.current) try{cyRef.current.destroy();}catch{} }, []);
+
+  if (!graph || !(graph.nodes||[]).length) {
+    return <div style={{padding:"20px", color:"#94a3b8", fontSize:"13px"}}>Graph not yet populated.</div>;
+  }
+  return (
+    <div style={{border:"1px solid var(--border)", borderRadius:"6px", overflow:"hidden"}}>
+      <div className="graph-toolbar">
+        <button className={filter.source?"on":""} onClick={() => setFilter(f=>({...f, source:!f.source}))}>Sources</button>
+        <button className={filter.csv?"on":""}    onClick={() => setFilter(f=>({...f, csv:!f.csv}))}>CSV</button>
+        <button className={filter.target?"on":""} onClick={() => setFilter(f=>({...f, target:!f.target}))}>Target (BQ)</button>
+        <button className={filter.mappings?"on":""} onClick={() => setFilter(f=>({...f, mappings:!f.mappings}))}>Mapping edges</button>
+        <span style={{marginLeft:"auto", color:"var(--text-dim)"}}>Arrow shapes encode cardinality (1:1, 1:M, M:1, M:M)</span>
+      </div>
+      <div ref={ref} className="graph-canvas"/>
+      {selected && (
+        <div className="graph-side">
+          {selected.kind === "node"
+            ? <><strong>{selected.label}</strong> <span style={{color:"#94a3b8"}}>({selected.dialect || "—"}, {selected.kind})</span>{selected.type && <span> · type {selected.type}</span>}</>
+            : <><strong>Mapping</strong>: {selected.field} <span style={{color:"#a855f7"}}>{selected.cardinality}</span></>
+          }
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TargetCard({ targetGraph }) {
+  if (!targetGraph || !targetGraph.project_id) return null;
+  return (
+    <div className="target-card">
+      <h4>BigQuery target dataset</h4>
+      <div style={{fontFamily:"monospace", marginBottom:"6px"}}>{targetGraph.project_id}.{targetGraph.dataset}</div>
+      {(targetGraph.tables||[]).length ? (
+        <>
+          <div className="tbl-list">
+            {targetGraph.tables.map(t => (
+              <span key={t.name} className="tbl-pill">{t.name} <span style={{color:"#94a3b8"}}>({(t.columns||[]).length} cols)</span></span>
+            ))}
+          </div>
+        </>
+      ) : (
+        <em style={{color:"#94a3b8"}}>dataset not yet present in BigQuery — target table will be created during materialize.</em>
+      )}
+    </div>
+  );
+}
+
+function MaterializeButton({ sessionId, gate2Approved, targetRef }) {
+  const [busy, setBusy] = React.useState(false);
+  const [ddl, setDdl] = React.useState(null);
+  const [result, setResult] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+
+  const previewDdl = async () => {
+    try {
+      const r = await fetch(`${API_BASE}/api/stm/sessions/${sessionId}/bq/preview-ddl`);
+      const j = await r.json();
+      setDdl(j.sql || "");
+    } catch (e) { setErr(e.message); }
+  };
+  const materialize = async () => {
+    setBusy(true); setErr(null); setResult(null);
+    try {
+      const r = await fetch(`${API_BASE}/api/stm/sessions/${sessionId}/bq/materialize`, { method: "POST" });
+      const j = await r.json();
+      if (!r.ok) { setErr(j.detail || JSON.stringify(j)); }
+      else setResult(j);
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  if (!gate2Approved) return null;
+  return (
+    <div className={`materialize-card ${err ? "error" : result ? "success" : ""}`}>
+      <strong>Materialize in BigQuery</strong>
+      <div style={{margin:"4px 0", fontSize:"12px", color:"#475569"}}>
+        Creates dataset (if missing) and table <code>{targetRef}</code> using CREATE IF NOT EXISTS. Safe to re-run.
+      </div>
+      {ddl && <pre>{ddl}</pre>}
+      {result && <div style={{color:"#065f46"}}>Created {result.table_ref} ({result.project_id})</div>}
+      {err && <div style={{color:"#991b1b"}}>{err}</div>}
+      <div style={{display:"flex", gap:"8px", marginTop:"8px"}}>
+        <button className="btn-ghost" disabled={busy} onClick={previewDdl}>Preview DDL</button>
+        <button className="btn-primary" disabled={busy} onClick={materialize}>{busy ? "Materializing..." : "Materialize"}</button>
+      </div>
+    </div>
+  );
+}
+
 function AgenticSession({ sessionId, onReset }) {
   const [summary, setSummary]               = useState(null);
   const [stages, setStages]                 = useState({});  // {L1: {status, duration_ms, llm_model}, ...}
@@ -1876,6 +2385,9 @@ function AgenticSession({ sessionId, onReset }) {
   const downloadXlsx = () => {
     window.location.href = `${API_BASE}/api/stm/sessions/${sessionId}/export`;
   };
+  const downloadChangelog = () => {
+    window.location.href = `${API_BASE}/api/stm/sessions/${sessionId}/export?format=changelog`;
+  };
 
   const cloneSession = async () => {
     try {
@@ -1904,26 +2416,39 @@ function AgenticSession({ sessionId, onReset }) {
               <span className="pill">{summary.source_profiles?.length || 0} sources</span>
               <span className={`pill pill-${summary.status}`}>{summary.status}</span>
               {summary.overall_band && <span className={`pill pill-${summary.overall_band}`}>band: {summary.overall_band}</span>}
+              {blackboard && blackboard.attachments && blackboard.attachments.length > 0 &&
+                <span className="pill">{blackboard.attachments.length} attachments</span>}
+              {blackboard && blackboard.intent && blackboard.intent.intent_kind === "enhance_existing" &&
+                <span className="enhance-badge">ENHANCING</span>}
             </>
           )}
         </div>
       </div>
 
+      {blackboard && blackboard.target_graph && <TargetCard targetGraph={blackboard.target_graph}/>}
+
       <div className="stepper">
         {STAGES.map(s => {
           const key = STAGE_ARTIFACT_KEY[s];
           const raw = blackboard ? blackboard[key] : null;
+          const isL2graph = s === "L2" && blackboard && blackboard.metadata_graph;
           return (
-            <StageRow
-              key={s}
-              stage={s}
-              status={stages[s]?.status || (summary && STAGES.indexOf(summary.current_stage) > STAGES.indexOf(s) ? "ready" : "pending")}
-              duration={stages[s]?.duration_ms}
-              model={stages[s]?.llm_model}
-              expanded={expanded === s}
-              onExpand={() => setExpanded(prev => prev === s ? null : s)}
-              artifact={summarizeArtifact(s, raw)}
-            />
+            <div key={s}>
+              <StageRow
+                stage={s}
+                status={stages[s]?.status || (summary && STAGES.indexOf(summary.current_stage) > STAGES.indexOf(s) ? "ready" : "pending")}
+                duration={stages[s]?.duration_ms}
+                model={stages[s]?.llm_model}
+                expanded={expanded === s}
+                onExpand={() => setExpanded(prev => prev === s ? null : s)}
+                artifact={summarizeArtifact(s, raw)}
+              />
+              {expanded === s && isL2graph && (
+                <div style={{marginBottom:"10px"}}>
+                  <GraphView graph={blackboard.metadata_graph} mappings={blackboard.candidate_mappings}/>
+                </div>
+              )}
+            </div>
           );
         })}
       </div>
@@ -1940,11 +2465,22 @@ function AgenticSession({ sessionId, onReset }) {
 
       {streamErr && <div className="banner banner-warn">{streamErr}</div>}
 
+      {terminal === "done" && (
+        <MaterializeButton
+          sessionId={sessionId}
+          gate2Approved={blackboard && blackboard.gates && blackboard.gates.gate2_validation && blackboard.gates.gate2_validation.decision === "approved"}
+          targetRef={blackboard ? `${blackboard.target_dataset}.${blackboard.target_table}` : ""}
+        />
+      )}
+
       <div className="agentic-actions">
         <button className="btn-ghost" onClick={onReset}>New session</button>
         {terminal && <button className="btn-ghost" onClick={cloneSession}>Clone & retry</button>}
         {terminal === "done" && (
           <button className="btn-primary" onClick={downloadXlsx}>Download STM xlsx</button>
+        )}
+        {terminal === "done" && blackboard && blackboard.intent && blackboard.intent.intent_kind === "enhance_existing" && (
+          <button className="btn-ghost" onClick={downloadChangelog}>Download changelog (.md)</button>
         )}
         {terminal === "failed" && <span className="text-rose">Session failed</span>}
         {terminal === "rejected" && <span className="text-rose">Session rejected at gate</span>}

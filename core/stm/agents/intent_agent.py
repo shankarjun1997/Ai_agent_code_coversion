@@ -58,6 +58,10 @@ _FACT_KEYWORDS = re.compile(
     r"\b(fact|transaction|event|order|payment|sale|log|activity)\b",
     re.IGNORECASE,
 )
+_ENHANCE_KEYWORDS = re.compile(
+    r"\b(add|append|extend|enhance|new column|update existing|alter)\b",
+    re.IGNORECASE,
+)
 
 
 def _keyword_floor(raw: str) -> Dict[str, Any]:
@@ -66,6 +70,7 @@ def _keyword_floor(raw: str) -> Dict[str, Any]:
         "scd_hint": "type2" if _SCD2_KEYWORDS.search(raw) else None,
         "is_dimension": bool(_DIM_KEYWORDS.search(raw)),
         "is_fact": bool(_FACT_KEYWORDS.search(raw)),
+        "enhance_hint": bool(_ENHANCE_KEYWORDS.search(raw)),
     }
 
 
@@ -127,6 +132,20 @@ class IntentAgent(StmAgent):
         if scd_hint not in ("type1", "type2", "type3", "none", None):
             scd_hint = None
 
+        # ── Enhancement detection: look up prior approved STM for this target ──
+        intent_kind = "new"
+        baseline_id: Optional[str] = None
+        if floor["enhance_hint"]:
+            try:
+                from core.stm.persistence import _find_latest_stm_by_target_sync
+                baseline_id = _find_latest_stm_by_target_sync(
+                    bb.target_dataset, bb.target_table, exclude_session_id=bb.session_id,
+                )
+                if baseline_id:
+                    intent_kind = "enhance_existing"
+            except Exception as exc:
+                logger.warning("baseline STM lookup failed: %s", exc)
+
         updated_intent = IntentArtifact(
             source=intent.source,
             raw_input=intent.raw_input,
@@ -140,6 +159,8 @@ class IntentAgent(StmAgent):
             grain_hint=grain_hint,
             extracted_keywords=keywords,
             status=StageStatus.ready,
+            intent_kind=intent_kind,
+            baseline_stm_id=baseline_id,
         )
 
         return BlackboardDelta(

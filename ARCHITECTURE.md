@@ -10,12 +10,12 @@ Unstructured Input (transcript / email / Jira issue)
          ▼
 ┌─────────────────────────────────────────────────────────┐
 │  Agent 1 — Requirement & Prototyping                    │
-│  Assigned: Paramjit                                     │
+│                                         │
 │  Output: RequirementsDoc + Jira story draft             │
 │  → LLM: Claude parses free-form text into structured    │
 │    tasks, ACs, clarifying questions, prototype table    │
 └─────────────────────────┬───────────────────────────────┘
-                          │ REVIEW GATE ← Paramjit approves
+                          │ REVIEW GATE ← Mohan approves
                           │ (Pipeline pauses, UI shows review prompt)
                           ▼
 ┌─────────────────────────────────────────────────────────┐
@@ -25,28 +25,29 @@ Unstructured Input (transcript / email / Jira issue)
                           ▼
 ┌─────────────────────────────────────────────────────────┐
 │  Agent 2 — Mapping / Design Document                    │
-│  Assigned: Shankar                                      │
+│                                      │
 │  Output: DataMapping config (source of truth)           │
 │  → Multi-turn tool-use: Claude discovers BQ schemas,    │
-│    maps every field, documents business rules, PII      │
+│    maps every field, documents business rules, PII
+   ┌──────────┐  ┌──────────────────────────┐            │.  - end goal - stm.excel
+│  │ 2a Connect  │  │ 2b Metadata              │  (parallel) │
+│  │ Teradata │  │ Lineage · Dataplex · PII │            │
+│  │ → BQ SQL │  │ BQ column descriptions   │            │
+│  └──────────┘  └──────────────────────────┘   │
 └─────────────────────────┬───────────────────────────────┘
                           │ REVIEW GATE ← Shankar approves
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────┐
 │  Agent 3 — Engineering Orchestrator                     │
-│  Assigned: Pradeep / Chirag / Rahul / Dinesh            │
+│           │
 │                                                         │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐             │
 │  │ 3a SQL   │  │ 3c DQ    │  │ 3d Obs   │  (parallel) │
 │  │ DDL/View │  │ Dataform │  │ Alerts   │             │
 │  │ dbt/SQLX │  │ dbt tests│  │ Logging  │             │
 │  └──────────┘  └──────────┘  └──────────┘             │
-│  ┌──────────┐  ┌──────────────────────────┐            │
-│  │ 3b Conv  │  │ 3e Metadata              │  (parallel) │
-│  │ Teradata │  │ Lineage · Dataplex · PII │            │
-│  │ → BQ SQL │  │ BQ column descriptions   │            │
-│  └──────────┘  └──────────────────────────┘            │
+│             │
 │                                                         │
 │  Output: EngineeringPackage + GitHub PR                 │
 └─────────────────────────┬───────────────────────────────┘
@@ -55,7 +56,7 @@ Unstructured Input (transcript / email / Jira issue)
                           ▼
 ┌─────────────────────────────────────────────────────────┐
 │  Agent 4 — QA                                           │
-│  Assigned: Sandeep / Saikrishna                         │
+│                           │
 │  Output: QAReport with executed test results            │
 │  → Generates + runs: row counts, null checks,           │
 │    dedup, referential integrity, reconciliation,        │
@@ -69,19 +70,19 @@ Unstructured Input (transcript / email / Jira issue)
 
 ## Services
 
-| Service | Technology | Port | Description |
-|---------|-----------|------|-------------|
+| Service | Technology       | Port | Description                                       |
+| ------- | ---------------- | ---- | ------------------------------------------------- |
 | `api`   | Python / FastAPI | 8000 | Pipeline orchestration, agent execution, REST API |
-| `ui`    | PHP 8.2 / Nginx | 8080 | Dashboard, review gates, real-time monitoring |
+| `ui`    | PHP 8.2 / Nginx  | 8080 | Dashboard, review gates, real-time monitoring     |
 
 ## Human-in-the-Loop Gates
 
-| Stage | Gate Owner | Action Required |
-|-------|-----------|-----------------|
-| After Agent 1 | Paramjit | Validate requirements, approve Jira push |
-| After Agent 2 | Shankar | Validate mapping document, approve design |
-| After Agent 3 | Engineer | Review PR, validate SQL/DQ/metadata |
-| After Agent 4 | Sandeep / Saikrishna | QA sign-off, approve release |
+| Stage         | Gate Owner           | Action Required                           |
+| ------------- | -------------------- | ----------------------------------------- |
+| After Agent 1 | Paramjit             | Validate requirements, approve Jira push  |
+| After Agent 2 | Shankar              | Validate mapping document, approve design |
+| After Agent 3 | Engineer             | Review PR, validate SQL/DQ/metadata       |
+| After Agent 4 | Sandeep / Saikrishna | QA sign-off, approve release              |
 
 ## Data Flow
 
@@ -111,6 +112,7 @@ Pipeline COMPLETED
 ## State Persistence
 
 SQLite (`output/state.db`) stores:
+
 - `pipeline_runs` — full run state, stage, all JSON payloads
 - `generated_artifacts` — individual files with content
 - `data_mappings` — versioned mapping documents

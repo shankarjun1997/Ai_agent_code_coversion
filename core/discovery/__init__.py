@@ -6,6 +6,7 @@ from core.discovery.registry import register_provider, get_provider, all_provide
 from core.discovery.oracle_provider import OracleProvider
 from core.discovery.mysql_provider import MySQLProvider
 from core.discovery.mssql_provider import MSSQLProvider
+from core.discovery.jira_provider import JiraProvider
 
 # Backward-compatible alias
 PostgresProvider = PostgresProviderAsync
@@ -16,9 +17,10 @@ register_provider("bigquery", BigQueryProvider())
 register_provider("oracle", OracleProvider())
 register_provider("mysql", MySQLProvider())
 register_provider("mssql", MSSQLProvider())
+register_provider("jira", JiraProvider())
 
 __all__ = [
     "PostgresProviderAsync", "PostgresProvider", "BigQueryProvider", "OracleProvider",
-    "MySQLProvider", "MSSQLProvider", "ProfileRegistry", "get_registry",
+    "MySQLProvider", "MSSQLProvider", "JiraProvider", "ProfileRegistry", "get_registry",
     "SourceProvider", "register_provider", "get_provider", "all_providers",
 ]

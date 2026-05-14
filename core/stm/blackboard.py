@@ -31,6 +31,26 @@ class IntentArtifact(BaseModel):
     grain_hint: Optional[str] = None
     extracted_keywords: List[str] = Field(default_factory=list)
     status: StageStatus = StageStatus.idle
+    intent_kind: Literal["new", "enhance_existing"] = "new"
+    baseline_stm_id: Optional[str] = None
+    delta_fields: List[str] = Field(default_factory=list)
+
+
+class Attachment(BaseModel):
+    """File uploaded at session start (CSV, PDF, DOCX, TXT).
+
+    CSV files are schema-inferred and contribute synthetic dialect='csv' nodes
+    to the metadata graph. Other types contribute their text excerpt to
+    intent.raw_input so L1 has full context.
+    """
+    id: str
+    filename: str
+    kind: Literal["csv", "pdf", "docx", "txt"]
+    bytes: int
+    stored_at: str
+    text_excerpt: str = ""
+    csv_schema: Optional[Dict[str, Any]] = None
+    uploaded_at: Optional[datetime] = None
 
 
 class GraphNode(BaseModel):
@@ -52,12 +72,27 @@ class GraphEdge(BaseModel):
     evidence: Optional[str] = None
 
 
+class TableScore(BaseModel):
+    """Aggregated relevance score per source table for Gate 1 ranking."""
+    table_id: str          # e.g. "postgres-crm-demo.crm.customers"
+    label: str             # display name
+    dialect: str
+    score: float           # 0..1
+    evidence: List[str] = Field(default_factory=list)
+    column_hits: int = 0
+    row_estimate: Optional[int] = None
+
+
 class MetadataGraph(BaseModel):
     nodes: List[GraphNode] = Field(default_factory=list)
     edges: List[GraphEdge] = Field(default_factory=list)
     sources_probed: List[str] = Field(default_factory=list)
     coverage_notes: List[str] = Field(default_factory=list)
     status: StageStatus = StageStatus.idle
+    # Per-profile resolution method: "live" | "dataplex" | "information_schema" | "inferred" | "failed"
+    profile_coverage: Dict[str, str] = Field(default_factory=dict)
+    # Top source tables ranked by intent-keyword match strength + FK density
+    table_scores: List[TableScore] = Field(default_factory=list)
 
     def find_by_concept(self, concept: str) -> List[GraphNode]:
         ids = {e.dst for e in self.edges if e.kind == "concept_link" and concept.lower() in (e.evidence or "").lower()}
@@ -85,6 +120,7 @@ class CandidateMapping(BaseModel):
     rule_baseline: bool = False
     refined_by_llm: bool = False
     llm_confidence: Optional[float] = None
+    from_baseline: bool = False
 
 
 class CandidateMappings(BaseModel):
@@ -149,6 +185,28 @@ class GateDecision(BaseModel):
     decided_at: Optional[datetime] = None
 
 
+class BqTargetTable(BaseModel):
+    """A single table discovered in the target BigQuery dataset."""
+    name: str
+    columns: List[Dict[str, Any]] = Field(default_factory=list)
+    row_count: Optional[int] = None
+    last_modified: Optional[str] = None
+
+
+class BqTargetGraph(BaseModel):
+    """Crawled summary of the target BigQuery dataset.
+
+    Populated by L2 alongside MetadataGraph when dialect_target == "bigquery".
+    L3/L4 prompts include this so generated mappings/transformations are
+    grounded in the actual target schema.
+    """
+    project_id: str = ""
+    dataset: str = ""
+    tables: List[BqTargetTable] = Field(default_factory=list)
+    status: StageStatus = StageStatus.idle
+    fetched_at: Optional[datetime] = None
+
+
 class StmBlackboard(BaseModel):
     session_id: str
     target_table: str
@@ -164,3 +222,7 @@ class StmBlackboard(BaseModel):
     gates: Dict[str, GateDecision] = Field(default_factory=dict)
     current_stage: Literal["L1", "L2", "L3", "L4", "L5", "L6", "done", "failed"] = "L1"
     refine_feedback_pending: Dict[str, str] = Field(default_factory=dict)
+    attachments: List[Attachment] = Field(default_factory=list)
+    target_graph: Optional[BqTargetGraph] = None
+    materialized: Optional[Dict[str, Any]] = None
+    baseline_stm_id: Optional[str] = None

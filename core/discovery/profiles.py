@@ -5,14 +5,14 @@ import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
 class ConnectionProfile:
     id:       str
     label:    str
-    dialect:  str            # "postgres" | "oracle" | "mysql" | "mssql" | "bigquery"
+    dialect:  str            # "postgres" | "oracle" | "mysql" | "mssql" | "bigquery" | "jira"
     dsn:      str
     host:     str
     last_used: Optional[str] = None
@@ -21,6 +21,7 @@ class ConnectionProfile:
     encrypted_credentials: Optional[bytes] = None
     last_ping: Optional[datetime] = None
     last_ping_status: Optional[str] = None
+    extra: Dict[str, Any] = field(default_factory=dict)   # per-dialect knobs (Jira project_key, BQ location, ...)
 
 
 class ProfileRegistry:
@@ -70,6 +71,9 @@ class ProfileRegistry:
         p = ConnectionProfile(id=pid, label=label, dialect="postgres",
                               dsn=dsn, host=host, icon="PG", last_used="just now")
         return self.register(p)
+
+    def remove(self, profile_id: str) -> bool:
+        return self._profiles.pop(profile_id, None) is not None
 
 
 _registry: Optional[ProfileRegistry] = None

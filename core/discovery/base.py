@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, List, Literal, Optional
 
 
-Dialect = Literal["postgres", "oracle", "mysql", "mssql", "bigquery"]
+Dialect = Literal["postgres", "oracle", "mysql", "mssql", "bigquery", "jira"]
 
 
 @dataclass

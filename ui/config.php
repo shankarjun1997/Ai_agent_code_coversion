@@ -4,10 +4,27 @@ define('API_BASE',    getenv('API_BASE_URL') ?: 'http://api:8000');
 define('APP_TITLE',   'SQL-Gen Pipeline');
 define('APP_VERSION', '2.0.0');
 
+// Auth gate: every PHP page including this config will require a session
+// EXCEPT the auth pages themselves (login.php, logout.php). They include
+// auth.php directly and never load this file's gate.
+if (!defined('STM_SKIP_AUTH_GATE')) {
+    require_once __DIR__ . '/auth.php';
+    stm_auth_require();
+}
+
+function _stm_auth_header(): string {
+    if (function_exists('stm_auth_token')) {
+        $t = stm_auth_token();
+        if ($t) return "Authorization: Bearer $t\r\n";
+    }
+    return '';
+}
+
 function api_get(string $path, array $params = []): array {
     $url = API_BASE . $path;
     if ($params) $url .= '?' . http_build_query($params);
     $ctx = stream_context_create(['http' => [
+        'header'  => _stm_auth_header(),
         'timeout' => 30,
         'ignore_errors' => true,
     ]]);
@@ -18,7 +35,7 @@ function api_get(string $path, array $params = []): array {
 function api_post(string $path, array $body = []): array {
     $ctx = stream_context_create(['http' => [
         'method'  => 'POST',
-        'header'  => "Content-Type: application/json\r\n",
+        'header'  => "Content-Type: application/json\r\n" . _stm_auth_header(),
         'content' => json_encode($body),
         'timeout' => 60,
         'ignore_errors' => true,

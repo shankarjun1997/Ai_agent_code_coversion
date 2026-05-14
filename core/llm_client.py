@@ -1,4 +1,10 @@
-"""OpenRouter LLM client — single-turn and multi-turn tool-use (OpenAI-compatible)."""
+"""OpenAI-compatible LLM client — works with OpenRouter, DeepSeek, OpenAI, vLLM, etc.
+
+Pick a provider via env:
+  LLM_BASE_URL = https://api.deepseek.com/v1        (or openrouter / openai / your own)
+  LLM_API_KEY  = <provider key>                     (OPENROUTER_API_KEY also accepted for back-compat)
+  LLM_MODEL    = deepseek-chat | deepseek-reasoner  (or any model the provider supports)
+"""
 from __future__ import annotations
 
 import json
@@ -11,18 +17,19 @@ from openai import OpenAI, RateLimitError, APIStatusError
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL  = os.environ.get("LLM_MODEL", "google/gemma-4-31b-it:free")
-OPENROUTER_URL = "https://openrouter.ai/api/v1"
-MAX_TOKENS     = 8192
-MAX_TOOL_TURNS = 15
-_RETRY_CODES   = {429, 524, 503, 502}
-_MAX_RETRIES   = 5
+DEFAULT_MODEL    = os.environ.get("LLM_MODEL", "deepseek-chat")
+DEFAULT_BASE_URL = os.environ.get("LLM_BASE_URL", "https://openrouter.ai/api/v1")
+MAX_TOKENS       = 8192
+MAX_TOOL_TURNS   = 15
+_RETRY_CODES     = {429, 524, 503, 502}
+_MAX_RETRIES     = 5
 
 
 class LLMClient:
-    def __init__(self, api_key: str, model: str = DEFAULT_MODEL):
-        self.client = OpenAI(api_key=api_key, base_url=OPENROUTER_URL)
+    def __init__(self, api_key: str, model: str = DEFAULT_MODEL, base_url: str = DEFAULT_BASE_URL):
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.model  = model
+        logger.info("LLMClient initialised: model=%s base_url=%s", model, base_url)
 
     # ── Single-turn completion ────────────────────────────────────────────────
 

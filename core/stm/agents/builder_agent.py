@@ -140,6 +140,14 @@ class BuilderAgent(StmAgent):
             "xlsx_available": xlsx_bytes is not None,
         }
 
+        # Enhancement run: emit a changelog.md alongside xlsx
+        if getattr(bb.intent, "intent_kind", "new") == "enhance_existing":
+            try:
+                changelog = _build_changelog(bb)
+                stm_result["changelog_md"] = changelog
+            except Exception as exc:
+                logger.warning("changelog build failed: %s", exc)
+
         logger.info(
             "BuilderAgent: session=%s fields=%d pii=%d band=%s",
             bb.session_id, len(rows), pii_count, bb.validation.overall_band,
@@ -151,3 +159,69 @@ class BuilderAgent(StmAgent):
                 "current_stage": "done",
             },
         )
+
+
+def _build_changelog(bb) -> str:
+    """Diff baseline mappings vs current mappings; emit markdown changelog."""
+    baseline_id = (bb.intent.baseline_stm_id if bb.intent else None) or getattr(bb, "baseline_stm_id", None)
+    baseline_rows = []
+    if baseline_id:
+        try:
+            from core.stm.persistence import _load_blackboard_sync
+            prior = _load_blackboard_sync(baseline_id)
+            baseline_rows = list(prior.candidate_mappings.rows) if prior and prior.candidate_mappings else []
+        except Exception:
+            baseline_rows = []
+    base_by_field = {r.target_field: r for r in baseline_rows}
+    cur_by_field = {r.target_field: r for r in bb.candidate_mappings.rows}
+
+    added, removed, changed = [], [], []
+    for f, r in cur_by_field.items():
+        if f not in base_by_field:
+            added.append(r)
+        else:
+            b = base_by_field[f]
+            if b.source_expression != r.source_expression or b.target_type != r.target_type:
+                changed.append((b, r))
+    for f, b in base_by_field.items():
+        if f not in cur_by_field:
+            removed.append(b)
+
+    tx_changed = []
+    if baseline_id:
+        try:
+            from core.stm.persistence import _load_blackboard_sync
+            prior = _load_blackboard_sync(baseline_id)
+            base_tx = {t.target_field: t for t in (prior.transformations.rows if prior.transformations else [])}
+            for t in bb.transformations.rows:
+                if t.target_field in base_tx and base_tx[t.target_field].logic != t.logic:
+                    tx_changed.append((base_tx[t.target_field], t))
+        except Exception:
+            pass
+
+    lines = [f"# STM enhancement changelog — {bb.target_dataset}.{bb.target_table}",
+             f"_Baseline session: `{baseline_id}` → new session: `{bb.session_id}`_",
+             ""]
+    if added:
+        lines.append("## Added columns")
+        for r in added:
+            lines.append(f"- **{r.target_field}** ({r.target_type}) — `{r.source_expression or '(derived)'}` — {r.rationale}")
+        lines.append("")
+    if changed:
+        lines.append("## Changed columns")
+        for b, r in changed:
+            lines.append(f"- **{r.target_field}**: type `{b.target_type}` → `{r.target_type}`, expr `{b.source_expression}` → `{r.source_expression}`")
+        lines.append("")
+    if removed:
+        lines.append("## Removed columns")
+        for r in removed:
+            lines.append(f"- ~~{r.target_field}~~ ({r.target_type}) — was: `{r.source_expression}`")
+        lines.append("")
+    if tx_changed:
+        lines.append("## Changed transformations")
+        for b, t in tx_changed:
+            lines.append(f"- **{t.target_field}** [{t.kind}]:\n  - before: `{b.logic}`\n  - after:  `{t.logic}`")
+        lines.append("")
+    if not (added or changed or removed or tx_changed):
+        lines.append("_No structural deltas detected — this enhancement re-ran with identical mappings._")
+    return "\n".join(lines)

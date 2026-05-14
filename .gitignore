@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Secrets & local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+service-account*.json
+google-credentials*.json
+.mcp.json
+.claude/settings.local.json
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+Thumbs.db
+
+# Logs & runtime
+*.log
+logs/
+*.pid
+
+# Local databases / artifacts
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+local_data/
+artifacts/
+exports/
+uploads/
+output/
+demo_output/
+
+# Cloud credentials
+gcp_json_key/
+*-service-account.json
+
+# Node (front-end build cache if any)
+node_modules/
+.next/
+.cache/
+
+# Misc Claude/AI tooling
+.claude-mem/
+.cron/

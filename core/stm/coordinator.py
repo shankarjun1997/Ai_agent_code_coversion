@@ -61,11 +61,44 @@ _running: Dict[str, asyncio.Task] = {}
 # Per-session gate events: session_id → {gate_name → asyncio.Event}
 _gate_events: Dict[str, Dict[str, asyncio.Event]] = {}
 
+# Per-session start gates (used when session was created with pause_for_attachments=true)
+_start_events: Dict[str, asyncio.Event] = {}
+
+
+def _get_start_event(session_id: str) -> asyncio.Event:
+    if session_id not in _start_events:
+        _start_events[session_id] = asyncio.Event()
+    return _start_events[session_id]
+
+
+def signal_start(session_id: str) -> bool:
+    """Unblock a session waiting on pause_for_attachments. Returns True if unblocked."""
+    ev = _start_events.get(session_id)
+    if ev is None:
+        return False
+    ev.set()
+    return True
+
 
 def _make_llm() -> LLMClientProtocol:
-    """Build the real LLM client from env, or return a no-op stub."""
+    """Build the real LLM client from env, or return a no-op stub.
+
+    Provider precedence (first found wins):
+      LLM_API_KEY  (preferred — generic)
+      DEEPSEEK_API_KEY
+      OPENROUTER_API_KEY
+      ANTHROPIC_API_KEY (only if LLM_BASE_URL points at an Anthropic-compat endpoint)
+
+    Base URL: LLM_BASE_URL env (defaults to OpenRouter in llm_client).
+    Model:    LLM_MODEL env.
+    """
     try:
-        api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("LLM_API_KEY", "")
+        api_key = (
+            os.environ.get("LLM_API_KEY")
+            or os.environ.get("DEEPSEEK_API_KEY")
+            or os.environ.get("OPENROUTER_API_KEY")
+            or os.environ.get("ANTHROPIC_API_KEY", "")
+        )
         if api_key:
             from core.llm_client import LLMClient
             return LLMClient(api_key=api_key)
@@ -113,6 +146,24 @@ async def _run_pipeline(
     except KeyError:
         logger.error("Coordinator: session %s not found in DB", session_id)
         return
+
+    # Pause-for-attachments: if the session was created with pause flag,
+    # wait until /start is called or 5 minutes elapse, then RELOAD bb so the
+    # attachments uploaded during the pause are visible to L1/L2.
+    if config.get("pause_for_attachments") and bb.current_stage == "L1":
+        await emit(EventKind.stage_started, stage="L0", data={"message": "awaiting attachments"})
+        start_event = _get_start_event(session_id)
+        try:
+            await asyncio.wait_for(start_event.wait(), timeout=300)
+        except asyncio.TimeoutError:
+            logger.warning("Coordinator: pause_for_attachments timed out for %s", session_id)
+        finally:
+            _start_events.pop(session_id, None)
+        try:
+            bb = await load_blackboard(session_id)
+        except KeyError:
+            logger.error("Coordinator: session %s gone after pause", session_id)
+            return
 
     try:
         for stage in _STAGE_ORDER:
@@ -295,8 +346,14 @@ async def start_session(
     jira_issue_key: Optional[str] = None,
     llm: Optional[LLMClientProtocol] = None,
     config: Optional[Dict[str, Any]] = None,
+    pause_for_attachments: bool = False,
 ) -> str:
-    """Create a new STM session and start the pipeline as a background task."""
+    """Create a new STM session and start the pipeline as a background task.
+
+    If pause_for_attachments=True, the coordinator pauses before L1 until
+    signal_start(session_id) is called (or 5min timeout). UI uses this to
+    upload CSV/PDF/DOCX attachments after create but before L1 runs.
+    """
     session_id = bb.session_id
     await create_session(
         bb,
@@ -306,7 +363,10 @@ async def start_session(
     )
 
     _llm = llm or _make_llm()
-    _config = config or {}
+    _config = dict(config or {})
+    if pause_for_attachments:
+        _config["pause_for_attachments"] = True
+        _get_start_event(session_id)
     lock_registry = get_lock_registry()
 
     task = asyncio.create_task(

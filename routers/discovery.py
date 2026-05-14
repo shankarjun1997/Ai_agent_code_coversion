@@ -22,6 +22,9 @@ def _serialise_profile(p) -> Dict[str, Any]:
         "icon":      p.icon,
         "status":    p.status,
         "last_used": p.last_used,
+        "last_ping": p.last_ping.isoformat() if getattr(p, "last_ping", None) else None,
+        "last_ping_status": getattr(p, "last_ping_status", None),
+        "extra":     getattr(p, "extra", {}) or {},
     }
 
 
@@ -49,18 +52,61 @@ async def register_postgres(payload: RegisterPostgresIn) -> Dict[str, Any]:
 
 
 @router.get("/profiles/{profile_id}/ping")
-async def ping(profile_id: str) -> Dict[str, Any]:
+async def ping_get(profile_id: str) -> Dict[str, Any]:
+    return await _ping_profile(profile_id)
+
+
+@router.post("/profiles/{profile_id}/ping")
+async def ping_post(profile_id: str) -> Dict[str, Any]:
+    return await _ping_profile(profile_id)
+
+
+@router.delete("/profiles/{profile_id}")
+async def delete_profile(profile_id: str) -> Dict[str, Any]:
+    reg = get_registry()
+    if not reg.get(profile_id):
+        raise HTTPException(status_code=404, detail="profile not found")
+    ok = reg.remove(profile_id)
+    return {"deleted": ok, "id": profile_id}
+
+
+async def _ping_profile(profile_id: str) -> Dict[str, Any]:
+    """Dispatch ping to the right provider by dialect, update last_ping fields."""
+    from datetime import datetime as _dt
+    from core.discovery.registry import get_provider as _get_provider
     reg = get_registry()
     p = reg.get(profile_id)
     if not p:
         raise HTTPException(status_code=404, detail="profile not found")
-    if p.dialect != "postgres":
-        raise HTTPException(status_code=400, detail=f"only postgres ping is implemented; got {p.dialect}")
+    provider = None
     try:
-        info = await PostgresProvider(p.dsn).ping()
-        return {"ok": True, **info}
+        provider = _get_provider(p.dialect)
+    except Exception:
+        provider = None
+    try:
+        if p.dialect == "postgres":
+            info = await PostgresProvider(p.dsn).ping()
+            ok = True
+            payload = {"ok": True, **info}
+        elif provider is not None:
+            result = await provider.ping(p)
+            ok = bool(getattr(result, "ok", False))
+            payload = {
+                "ok": ok,
+                "latency_ms": getattr(result, "latency_ms", None),
+                "message": getattr(result, "message", None),
+            }
+        else:
+            raise HTTPException(status_code=400, detail=f"no provider for dialect {p.dialect}")
+    except HTTPException:
+        raise
     except Exception as e:
+        p.last_ping = _dt.utcnow()
+        p.last_ping_status = "error"
         raise HTTPException(status_code=502, detail=f"ping failed: {e}")
+    p.last_ping = _dt.utcnow()
+    p.last_ping_status = "ok" if ok else "error"
+    return payload
 
 
 @router.get("/profiles/{profile_id}/schemas")
@@ -180,3 +226,46 @@ async def post_mssql(body: _MSSQLIn) -> dict:
 async def post_bigquery(body: _BQIn) -> dict:
     creds = {"credentials_json": body.credentials_json} if body.credentials_json else None
     return _register_profile("bigquery", body.label, body.project_id, "bigquery", creds)
+
+
+class _JiraIn(BaseModel):
+    label: str
+    base_url: str
+    email: str
+    api_token: str
+    project_key: str | None = None
+
+
+@router.post("/profiles/jira")
+async def post_jira(body: _JiraIn) -> dict:
+    """Register a Jira workspace as a connection profile."""
+    base = body.base_url.rstrip("/")
+    pid = f"jr-{_uuid.uuid4().hex[:8]}"
+    creds = {"email": body.email, "api_token": body.api_token}
+    extra = {"email": body.email, "project_key": body.project_key} if body.project_key else {"email": body.email}
+    try:
+        blob = _encrypt(creds)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"credential encryption failed: {e}")
+    reg = get_registry()
+    p = _ConnectionProfile(
+        id=pid, label=body.label, dialect="jira",
+        dsn=base, host=base.replace("https://", "").replace("http://", ""),
+        icon="JR", encrypted_credentials=blob, extra=extra,
+    )
+    reg.register(p)
+    return {"id": p.id, "label": p.label, "dialect": p.dialect, "host": p.host}
+
+
+@router.get("/jira/{profile_id}/issue/{issue_key}")
+async def jira_get_issue(profile_id: str, issue_key: str) -> dict:
+    from core.discovery.registry import get_provider as _gp
+    reg = get_registry()
+    p = reg.get(profile_id)
+    if not p or p.dialect != "jira":
+        raise HTTPException(status_code=404, detail="jira profile not found")
+    provider = _gp("jira")
+    data = await provider.get_issue(p, issue_key)
+    if not data.get("ok"):
+        raise HTTPException(status_code=502, detail=data.get("message") or "jira fetch failed")
+    return data

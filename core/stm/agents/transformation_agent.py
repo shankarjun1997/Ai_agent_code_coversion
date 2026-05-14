@@ -112,19 +112,36 @@ class TransformationAgent(StmAgent):
         # ── 1. Deterministic floor ────────────────────────────────────────────
         floor = _deterministic_floor(bb.intent, bb.candidate_mappings)
 
-        # ── 2. Build LLM prompt ───────────────────────────────────────────────
+        # ── 2. Build LLM prompt with BQ target context ────────────────────────
+        is_enhance = getattr(bb.intent, "intent_kind", "new") == "enhance_existing"
+        from_baseline = {m.target_field.lower() for m in bb.candidate_mappings.rows if getattr(m, "from_baseline", False)}
         mappings_summary = [
             {"target_field": m.target_field, "target_type": m.target_type,
-             "source_expression": m.source_expression}
+             "source_expression": m.source_expression,
+             "from_baseline": bool(getattr(m, "from_baseline", False))}
             for m in bb.candidate_mappings.rows[:50]
         ]
+        target_summary = ""
+        try:
+            from core.stm.tools.bq_tools import render_target_summary
+            target_summary = render_target_summary(getattr(bb, "target_graph", None))
+        except Exception:
+            target_summary = "(target schema unavailable)"
+
+        enhance_note = ""
+        if is_enhance and from_baseline:
+            enhance_note = (
+                f"\nENHANCEMENT MODE: rewrite transformations ONLY for fields NOT in baseline: "
+                f"{', '.join(sorted({m.target_field for m in bb.candidate_mappings.rows if not getattr(m,'from_baseline', False)}))}\n"
+            )
         prompt = (
             f"Target table: {bb.target_dataset}.{bb.target_table}\n"
             f"Intent: {bb.intent.raw_input}\n"
             f"SCD hint: {bb.intent.scd_hint}\n"
             f"Is dimension: {bb.intent.is_dimension}\n"
-            f"Candidate mappings:\n{json.dumps(mappings_summary, indent=2)}\n\n"
-            "Produce the transformation specification."
+            f"## Target schema (live BigQuery)\n{target_summary}\n\n"
+            f"Candidate mappings:\n{json.dumps(mappings_summary, indent=2)}{enhance_note}\n\n"
+            "Produce the transformation specification. Use dry_run_sql to validate any non-trivial SQL expression you propose."
         )
 
         derived_rows: List[Transformation] = []
@@ -135,14 +152,27 @@ class TransformationAgent(StmAgent):
         llm_tokens_in = 0
         llm_tokens_out = 0
 
-        # ── 3. LLM refinement ─────────────────────────────────────────────────
+        # ── 3. LLM refinement (tool-using when available) ─────────────────────
         try:
-            response = ctx.llm.complete(
-                prompt=prompt,
-                system=_SYSTEM_PROMPT,
-                max_tokens=1024,
-                temperature=0.0,
-            )
+            from core.stm.tools import BQ_TOOL_SCHEMAS, make_bq_tool_handler
+            handler = make_bq_tool_handler()
+            if hasattr(ctx.llm, "run_agent"):
+                response, tool_history = ctx.llm.run_agent(
+                    system=_SYSTEM_PROMPT,
+                    user_message=prompt,
+                    tools=BQ_TOOL_SCHEMAS,
+                    tool_handler=handler,
+                    max_tokens=1024,
+                )
+                if tool_history:
+                    logger.info("L4 used %d tool calls", len(tool_history))
+            else:
+                response = ctx.llm.complete(
+                    prompt=prompt,
+                    system=_SYSTEM_PROMPT,
+                    max_tokens=1024,
+                    temperature=0.0,
+                )
             llm_tokens_in = len(prompt.split()) + len(_SYSTEM_PROMPT.split())
             llm_tokens_out = len(response.split())
             llm_data = _parse_llm_transformations(response)

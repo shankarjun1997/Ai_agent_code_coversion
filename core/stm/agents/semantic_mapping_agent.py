@@ -183,36 +183,78 @@ class SemanticMappingAgent(StmAgent):
         graph = bb.metadata_graph
         model = ctx.get("llm_model_l3", "opus")
 
-        # ── 1. Deterministic rule baseline ────────────────────────────────────
-        baseline = _build_rule_baseline(bb.target_table, bb.target_dataset, graph)
+        # ── 0. Enhancement branch: load baseline STM if intent_kind=enhance_existing ──
+        baseline_rows, delta_only = _load_baseline_rows(bb)
 
-        # ── 2. Build LLM prompt ───────────────────────────────────────────────
+        # ── 1. Deterministic rule baseline (from sources) ──────────────────────
+        baseline = _build_rule_baseline(bb.target_table, bb.target_dataset, graph)
+        if baseline_rows:
+            # Start enhancement sessions from the prior approved rows
+            existing_fields = {m.target_field for m in baseline}
+            for r in baseline_rows:
+                if r.target_field not in existing_fields:
+                    baseline.append(r)
+
+        # ── 2. Build LLM prompt with BQ target context ─────────────────────────
         source_cols = _extract_columns_from_graph(graph)
-        cols_summary = json.dumps(source_cols[:80], indent=2)  # cap at 80 cols
+        cols_summary = json.dumps(source_cols[:80], indent=2)
+        target_summary = _render_target_summary(bb)
+        enhance_note = ""
+        if delta_only:
+            existing_field_list = sorted({r.target_field for r in baseline_rows})
+            enhance_note = (
+                "\n\nENHANCEMENT MODE: A prior STM already exists for this target table. "
+                "Existing columns (do NOT rewrite unless intent demands): "
+                f"{', '.join(existing_field_list)}.\n"
+                f"Only emit mapping rows for NEW or CHANGED target_fields. "
+                "Mark new rows clearly in rationale."
+            )
+
         prompt = (
             f"Target table: {bb.target_dataset}.{bb.target_table}\n"
             f"Intent: {bb.intent.raw_input}\n"
             f"Entity: {bb.intent.entity}, Action: {bb.intent.action}\n\n"
-            f"Available source columns:\n{cols_summary}\n\n"
-            "Map source columns to target fields."
+            f"## Target schema (live BigQuery)\n{target_summary}\n\n"
+            f"## Available source columns\n{cols_summary}\n"
+            f"{enhance_note}\n\n"
+            "Map source columns to target fields. Use lookup_bq_table when you need to "
+            "verify a specific table's exact column types."
         )
 
         llm_tokens_in = 0
         llm_tokens_out = 0
         merged: List[CandidateMapping] = baseline
 
-        # ── 3. LLM refinement ─────────────────────────────────────────────────
+        # ── 3. LLM refinement — try tool-using agent loop first, fall back to single-shot
         try:
-            response = ctx.llm.complete(
-                prompt=prompt,
-                system=_SYSTEM_PROMPT,
-                max_tokens=2048,
-                temperature=0.0,
-            )
+            from core.stm.tools import BQ_TOOL_SCHEMAS, make_bq_tool_handler
+            handler = make_bq_tool_handler()
+            if hasattr(ctx.llm, "run_agent"):
+                response, tool_history = ctx.llm.run_agent(
+                    system=_SYSTEM_PROMPT,
+                    user_message=prompt,
+                    tools=BQ_TOOL_SCHEMAS,
+                    tool_handler=handler,
+                    max_tokens=2048,
+                )
+                if tool_history:
+                    logger.info("L3 used %d tool calls", len(tool_history))
+            else:
+                response = ctx.llm.complete(
+                    prompt=prompt, system=_SYSTEM_PROMPT,
+                    max_tokens=2048, temperature=0.0,
+                )
             llm_tokens_in = len(prompt.split()) + len(_SYSTEM_PROMPT.split())
             llm_tokens_out = len(response.split())
             llm_rows = _parse_llm_mappings(response)
             merged = _merge_with_llm(baseline, llm_rows, graph)
+            if delta_only:
+                # Mark unchanged baseline rows
+                touched = {row.get("target_field", "").lower() for row in llm_rows}
+                for m in merged:
+                    if m.target_field.lower() not in touched and m.target_field in {b.target_field for b in baseline_rows}:
+                        m.from_baseline = True
+                        m.refined_by_llm = False
         except Exception as exc:
             logger.warning("SemanticMappingAgent LLM call failed, using baseline only: %s", exc)
 
@@ -223,6 +265,8 @@ class SemanticMappingAgent(StmAgent):
             rule_baseline_summary={
                 "baseline_count": len(baseline),
                 "llm_refined_count": sum(1 for m in merged if m.refined_by_llm),
+                "from_baseline_count": sum(1 for m in merged if m.from_baseline),
+                "delta_mode": delta_only,
             },
             status=StageStatus.ready,
         )
@@ -233,3 +277,31 @@ class SemanticMappingAgent(StmAgent):
             llm_tokens_out=llm_tokens_out,
             llm_model=model,
         )
+
+
+def _render_target_summary(bb) -> str:
+    try:
+        from core.stm.tools.bq_tools import render_target_summary
+        return render_target_summary(getattr(bb, "target_graph", None))
+    except Exception:
+        return "(target schema unavailable)"
+
+
+def _load_baseline_rows(bb):
+    """If intent_kind=enhance_existing, return prior CandidateMappings.rows + True.
+    Otherwise ([], False). Uses sync persistence call so it works inside async agents."""
+    if getattr(bb.intent, "intent_kind", "new") != "enhance_existing":
+        return [], False
+    baseline_id = bb.intent.baseline_stm_id or getattr(bb, "baseline_stm_id", None)
+    if not baseline_id:
+        return [], False
+    try:
+        from core.stm.persistence import _load_blackboard_sync
+        prior = _load_blackboard_sync(baseline_id)
+        rows = list(prior.candidate_mappings.rows) if prior and prior.candidate_mappings else []
+        for r in rows:
+            r.from_baseline = True
+        return rows, True
+    except Exception as exc:
+        logger.warning("baseline STM load failed for %s: %s", baseline_id, exc)
+        return [], False
