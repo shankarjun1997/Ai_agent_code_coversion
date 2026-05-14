@@ -73,6 +73,50 @@ def _build_schema(meta: MetaData) -> None:
         Column("refine_feedback", Text(), nullable=True),
         Column("decided_at", DateTime(), nullable=False),
     )
+    Table(
+        "mapping_memory", meta,
+        Column("id", String(36), primary_key=True),
+        Column("session_id", String(36), nullable=False),
+        Column("gate_name", String(32), nullable=False),
+        Column("decision", String(16), nullable=False),  # approved / refine / rejected
+        Column("reviewer", String(128), nullable=True),
+        Column("decided_at", DateTime(), nullable=False),
+
+        Column("intent_kind", String(32), nullable=True),
+        Column("intent_action", String(32), nullable=True),
+        Column("intent_entity", String(128), nullable=True),
+        Column("intent_keywords_json", Text(), nullable=True),
+        Column("jira_issue_key", String(64), nullable=True),
+
+        Column("target_dataset", String(128), nullable=False),
+        Column("target_table", String(128), nullable=False),
+        Column("target_field", String(128), nullable=True),
+        Column("target_type", String(64), nullable=True),
+
+        Column("source_node_ids_json", Text(), nullable=True),
+        Column("source_expression", Text(), nullable=True),
+        Column("cardinality", String(16), nullable=True),
+        Column("rationale", Text(), nullable=True),
+
+        Column("transformation_kind", String(32), nullable=True),
+        Column("transformation_logic", Text(), nullable=True),
+
+        Column("confidence_band", String(16), nullable=True),
+        Column("confidence_final", Float(), nullable=True),
+        Column("score_llm", Float(), nullable=True),
+        Column("score_name_sim", Float(), nullable=True),
+        Column("score_type_compat", Float(), nullable=True),
+        Column("score_profile_overlap", Float(), nullable=True),
+        Column("score_fk_evidence", Float(), nullable=True),
+
+        Column("reviewer_notes", Text(), nullable=True),
+        Column("refine_feedback", Text(), nullable=True),
+
+        Column("created_at", DateTime(), nullable=False),
+        Index("idx_mapping_memory_target", "target_dataset", "target_table", "target_field"),
+        Index("idx_mapping_memory_decision", "decision"),
+        Index("idx_mapping_memory_created", "created_at"),
+    )
 
 
 def _resolve_db_url() -> str:
@@ -349,3 +393,154 @@ def reset_engine_for_tests() -> None:
     global _engine, _meta
     _engine = None
     _meta = None
+
+
+# ── Mapping memory (Phase A: log every gate2 decision) ────────────────────
+
+def _log_mapping_memory_rows_sync(
+    *,
+    session_id: str,
+    gate_name: str,
+    decision: str,
+    reviewer: Optional[str],
+    decided_at: datetime,
+    blackboard: StmBlackboard,
+    reviewer_notes: Optional[str],
+    refine_feedback: Optional[str],
+) -> int:
+    intent = blackboard.intent
+    validation = blackboard.validation
+    mappings = blackboard.candidate_mappings
+    transforms = blackboard.transformations
+
+    score_by_field: Dict[str, Any] = {}
+    if validation and getattr(validation, "scores", None):
+        for s in validation.scores:
+            score_by_field[s.target_field] = s
+
+    tx_by_field: Dict[str, Any] = {}
+    if transforms and getattr(transforms, "rows", None):
+        for t in transforms.rows:
+            tx_by_field[t.target_field] = t
+
+    common = {
+        "session_id": session_id,
+        "gate_name": gate_name,
+        "decision": decision,
+        "reviewer": reviewer,
+        "decided_at": decided_at,
+        "intent_kind": getattr(intent, "intent_kind", None) if intent else None,
+        "intent_action": getattr(intent, "action", None) if intent else None,
+        "intent_entity": getattr(intent, "entity", None) if intent else None,
+        "intent_keywords_json": json.dumps(getattr(intent, "extracted_keywords", []) or []) if intent else None,
+        "jira_issue_key": getattr(intent, "jira_issue_key", None) if intent else None,
+        "target_dataset": blackboard.target_dataset,
+        "target_table": blackboard.target_table,
+        "reviewer_notes": reviewer_notes,
+        "refine_feedback": refine_feedback,
+    }
+
+    rows: List[Dict[str, Any]] = []
+
+    # If we have per-field mappings, log one row per target field
+    if mappings and getattr(mappings, "rows", None):
+        for m in mappings.rows:
+            score = score_by_field.get(m.target_field)
+            tx = tx_by_field.get(m.target_field)
+            rows.append({
+                "id": str(uuid.uuid4()),
+                **common,
+                "target_field": m.target_field,
+                "target_type": m.target_type,
+                "source_node_ids_json": json.dumps(m.source_node_ids or []),
+                "source_expression": m.source_expression or None,
+                "cardinality": m.cardinality,
+                "rationale": m.rationale or None,
+                "transformation_kind": getattr(tx, "kind", None) if tx else None,
+                "transformation_logic": getattr(tx, "logic", None) if tx else None,
+                "confidence_band": getattr(score, "band", None) if score else None,
+                "confidence_final": getattr(score, "final", None) if score else None,
+                "score_llm": getattr(score, "llm_score", None) if score else None,
+                "score_name_sim": getattr(score, "name_sim_score", None) if score else None,
+                "score_type_compat": getattr(score, "type_compat_score", None) if score else None,
+                "score_profile_overlap": getattr(score, "profile_overlap_score", None) if score else None,
+                "score_fk_evidence": getattr(score, "fk_evidence_score", None) if score else None,
+                "created_at": decided_at,
+            })
+    else:
+        # Session-level entry for refines/rejects that may not have full mappings
+        rows.append({
+            "id": str(uuid.uuid4()),
+            **common,
+            "target_field": None,
+            "target_type": None,
+            "source_node_ids_json": None,
+            "source_expression": None,
+            "cardinality": None,
+            "rationale": None,
+            "transformation_kind": None,
+            "transformation_logic": None,
+            "confidence_band": getattr(validation, "overall_band", None) if validation else None,
+            "confidence_final": None,
+            "score_llm": None,
+            "score_name_sim": None,
+            "score_type_compat": None,
+            "score_profile_overlap": None,
+            "score_fk_evidence": None,
+            "created_at": decided_at,
+        })
+
+    if not rows:
+        return 0
+
+    with _eng().begin() as conn:
+        conn.execute(insert(_t("mapping_memory")), rows)
+    return len(rows)
+
+
+async def log_mapping_memory_rows(
+    *,
+    session_id: str,
+    gate_name: str,
+    decision: str,
+    reviewer: Optional[str],
+    blackboard: StmBlackboard,
+    reviewer_notes: Optional[str] = None,
+    refine_feedback: Optional[str] = None,
+) -> int:
+    return await asyncio.to_thread(
+        _log_mapping_memory_rows_sync,
+        session_id=session_id,
+        gate_name=gate_name,
+        decision=decision,
+        reviewer=reviewer,
+        decided_at=datetime.utcnow(),
+        blackboard=blackboard,
+        reviewer_notes=reviewer_notes,
+        refine_feedback=refine_feedback,
+    )
+
+
+def _mapping_memory_stats_sync() -> Dict[str, Any]:
+    from sqlalchemy import func as sa_func
+    t = _t("mapping_memory")
+    with _eng().connect() as conn:
+        total = conn.execute(select(sa_func.count()).select_from(t)).scalar() or 0
+        by_decision = dict(conn.execute(
+            select(t.c.decision, sa_func.count()).group_by(t.c.decision)
+        ).all())
+        recent = conn.execute(
+            select(
+                t.c.id, t.c.session_id, t.c.decision, t.c.target_dataset, t.c.target_table,
+                t.c.target_field, t.c.confidence_band, t.c.confidence_final, t.c.created_at,
+            ).order_by(t.c.created_at.desc()).limit(20)
+        ).mappings().all()
+    return {
+        "total": int(total),
+        "by_decision": {k: int(v) for k, v in by_decision.items()},
+        "recent": [dict(r) for r in recent],
+    }
+
+
+async def mapping_memory_stats() -> Dict[str, Any]:
+    return await asyncio.to_thread(_mapping_memory_stats_sync)

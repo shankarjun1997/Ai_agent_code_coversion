@@ -34,8 +34,10 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - DEMO_DB_DSN=postgresql://demo:demo@demo-db:5432/crm_demo
+      - GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcpproject-438715-1815fb72089f.json
     volumes:
       - output_data:/app/output
+      - ./gcp_json_key:/secrets:ro
     ports:
       - "8000:8000"
     depends_on:

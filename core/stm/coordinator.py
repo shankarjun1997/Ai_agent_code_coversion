@@ -325,6 +325,24 @@ async def decide_gate(
         refine_feedback=refine_feedback,
     )
 
+    # Mapping-memory seed: log every gate2 decision (approved/refine/rejected) as
+    # training signal for future RAG retrieval. Gate1 decisions skipped — they
+    # don't yet have per-field mappings.
+    if gate_name == "gate2_validation":
+        try:
+            from core.stm.persistence import log_mapping_memory_rows  # local import to avoid cycle on cold start
+            await log_mapping_memory_rows(
+                session_id=session_id,
+                gate_name=gate_name,
+                decision=decision,
+                reviewer=reviewer,
+                blackboard=bb,
+                reviewer_notes=notes,
+                refine_feedback=refine_feedback,
+            )
+        except Exception as e:  # never block the gate path on memory write
+            logging.getLogger(__name__).warning("mapping_memory log failed: %s", e)
+
     # Unblock the waiting pipeline task
     gate_event = _get_gate_event(session_id, gate_name)
     gate_event.set()
