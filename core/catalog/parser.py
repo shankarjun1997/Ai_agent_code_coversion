@@ -213,6 +213,89 @@ def _try_strategy_0(sheets: List[Dict[str, Any]]) -> Optional[List[ParsedTable]]
     return tables or None
 
 
+# ── Column-list splitting (matches JS splitColumnList at ~line 90) ──────────
+
+def _split_column_list(raw: Any) -> List[str]:
+    """Split a comma/newline/pipe/semicolon-delimited column list into parts."""
+    s = str(raw or "").strip()
+    if not s:
+        return []
+    # JSON array?
+    if s.startswith("["):
+        try:
+            import json
+            arr = json.loads(s)
+            if isinstance(arr, list):
+                return [str(x).strip() for x in arr if str(x).strip()]
+        except ValueError:
+            pass
+    # Try newline first, then comma/semicolon/pipe. Best split = most parts.
+    best = [s]
+    for sep_re in (re.compile(r"\r?\n"), re.compile(r"\s*[,;|]\s*")):
+        parts = [p.strip() for p in sep_re.split(s) if p.strip()]
+        if len(parts) > len(best):
+            best = parts
+    return best
+
+
+# ── Strategy 1: explicit schema dump ────────────────────────────────────────
+
+def _try_strategy_1(sheets: List[Dict[str, Any]]) -> Optional[List[ParsedTable]]:
+    """Schema-dump file with table_name + column information.
+
+    1a — one row per column: header has table_name AND column_name.
+    1b — one row per table: header has table_name AND a list column (`columns`,
+         `column_name`, `fields`...). The list column carries CSV-aggregated names.
+    """
+    for sheet in sheets:
+        rows = sheet["rows2D"]
+        if not rows:
+            continue
+        headers = list(rows[0])
+        ti = _match_key(headers, TABLE_KEYS)
+        ci = _match_key(headers, COLUMN_KEYS)
+        if ti == -1 or ci == -1:
+            continue
+        ty = _match_key(headers, TYPE_KEYS)
+        ds = _match_key(headers, DESC_KEYS)
+
+        body = rows[1:]
+        if not body:
+            continue
+
+        per_table: Dict[str, List[Dict[str, Any]]] = {}
+        for r in body:
+            if ti >= len(r):
+                continue
+            tname = r[ti]
+            if not tname:
+                continue
+            tname = str(tname).strip()
+            col_cell = r[ci] if ci < len(r) else ""
+            type_cell = r[ty] if ty != -1 and ty < len(r) else None
+            desc_cell = r[ds] if ds != -1 and ds < len(r) else None
+
+            parts = _split_column_list(col_cell)
+            if len(parts) > 1:
+                # 1b — explode the CSV into one entry per column.
+                for ord_i, p in enumerate(parts):
+                    per_table.setdefault(tname, []).append({
+                        "name": p, "type": None, "description": None, "ordinal": ord_i,
+                    })
+            else:
+                per_table.setdefault(tname, []).append({
+                    "name": str(col_cell).strip(),
+                    "type": str(type_cell).strip() if type_cell else None,
+                    "description": str(desc_cell).strip() if desc_cell else None,
+                    "ordinal": len(per_table.get(tname, [])),
+                })
+
+        if not per_table:
+            continue
+        return [ParsedTable(table_name=tname, columns=cols) for tname, cols in per_table.items()]
+    return None
+
+
 # ── Main entrypoint ─────────────────────────────────────────────────────────
 
 def parse_schema_file(path: Path) -> ParsedSchema:
@@ -231,7 +314,11 @@ def parse_schema_file(path: Path) -> ParsedSchema:
                 t.table_name = path.stem.replace("_source", "").replace("_sample", "")
         return ParsedSchema(tables=s0, strategy="data_sample")
 
+    s1 = _try_strategy_1(sheets)
+    if s1:
+        return ParsedSchema(tables=s1, strategy="schema_dump")
+
     raise ParserError(
-        f"No strategy matched {path.name}. Strategies 1 (schema dump) and 2 "
-        f"(workbook-per-table) are added in later tasks."
+        f"No strategy matched {path.name}. Strategy 2 "
+        f"(workbook-per-table) is added in a later task."
     )
