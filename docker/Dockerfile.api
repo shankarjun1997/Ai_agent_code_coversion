@@ -13,10 +13,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY core/       ./core/
-COPY agents/     ./agents/
 COPY routers/    ./routers/
+COPY alembic/    ./alembic/
+COPY alembic.ini ./
 COPY app.py      .
-COPY pipeline.py .
 
 # Output directory for SQLite and artifacts
 RUN mkdir -p /app/output
