@@ -1,111 +1,148 @@
-"""Render a MappingResult to .xlsx (openpyxl) or .csv. Stakeholder-ready format."""
+"""STM exporter — xlsx + zip output.
+
+Mirrors the artifact's `buildStmWorkbook` + `buildZip`:
+  - xlsx with two sheets: STM (one row per mapping) + metadata
+  - zip with one .sql per target table + combined .sql + README.txt
+"""
 from __future__ import annotations
 
-import csv
 import io
-from typing import TYPE_CHECKING
+import struct
+import zlib
+from datetime import datetime, timezone
+from typing import List, Tuple
 
-if TYPE_CHECKING:
-    from core.stm.mapping_engine import MappingResult
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
-
-HEADERS = [
-    "Source System", "Source Schema", "Source Table", "Source Column", "Source Type",
-    "Nullable", "Source Description",
-    "Target Dataset", "Target Table", "Target Column", "Target Type",
-    "Transformation", "PII", "Sensitivity", "Notes",
-]
+from core.stm.blackboard import SqlBundle, StmBlackboard
 
 
-def _row_values(r) -> list:
-    return [
-        r.source_system, r.source_schema, r.source_table, r.source_column, r.source_type,
-        "Y" if r.source_nullable else "N", r.source_description or "",
-        r.target_dataset, r.target_table, r.target_column, r.target_type,
-        r.transformation, "Y" if r.is_pii else "N", r.sensitivity, r.notes,
-    ]
-
-
-def to_csv(result: "MappingResult") -> bytes:
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(HEADERS)
-    for r in result.rows:
-        w.writerow(_row_values(r))
-    return buf.getvalue().encode("utf-8")
-
-
-def to_xlsx(result: "MappingResult") -> bytes:
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
-
+def build_stm_xlsx(bb: StmBlackboard) -> bytes:
     wb = Workbook()
-
-    # ── Sheet 1: Mapping ─────────────────────────────────────────────────
     ws = wb.active
-    ws.title = "Mapping"
+    ws.title = "STM"
 
-    header_fill = PatternFill(start_color="07111F", end_color="07111F", fill_type="solid")
-    header_font = Font(name="Calibri", size=11, bold=True, color="FBBF24")
-    body_font   = Font(name="Calibri", size=10)
-    pii_fill    = PatternFill(start_color="FFE4E6", end_color="FFE4E6", fill_type="solid")
-    thin = Side(border_style="thin", color="E5E7EB")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-
-    for col_idx, h in enumerate(HEADERS, 1):
-        cell = ws.cell(row=1, column=col_idx, value=h)
-        cell.fill = header_fill
+    headers = ["Source Table", "Source Column", "Target Table", "Target Column",
+               "Mapping Type", "Business Logic"]
+    ws.append(headers)
+    header_font = Font(bold=True, color="FFFFF8E7")
+    header_fill = PatternFill(start_color="FF1F2937", end_color="FF1F2937", fill_type="solid")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for col_idx in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col_idx)
         cell.font = header_font
-        cell.alignment = Alignment(horizontal="left", vertical="center")
-        cell.border = border
+        cell.fill = header_fill
+        cell.alignment = header_align
 
-    for i, r in enumerate(result.rows, 2):
-        for col_idx, val in enumerate(_row_values(r), 1):
-            cell = ws.cell(row=i, column=col_idx, value=val)
-            cell.font = body_font
-            cell.border = border
-            if r.is_pii:
-                cell.fill = pii_fill
+    for m in bb.mappings:
+        ws.append([
+            m.source_table, m.source_column,
+            m.target_table or "", m.target_column or "",
+            m.mapping_type, m.business_logic or "",
+        ])
 
-    # Column widths
-    widths = [14, 14, 16, 22, 22, 9, 36, 18, 22, 22, 14, 38, 6, 12, 14]
-    for i, w in enumerate(widths, 1):
+    widths = [26, 30, 28, 28, 14, 80]
+    for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = "A2"
 
-    # ── Sheet 2: Summary ─────────────────────────────────────────────────
-    ws2 = wb.create_sheet("Summary")
-    ws2["A1"] = "Source-to-Target Mapping (STM)"
-    ws2["A1"].font = Font(name="Calibri", size=16, bold=True, color="07111F")
-    summary = [
-        ("STM ID",               result.stm_id),
-        ("Generated at",         result.generated_at),
-        ("Source system",        result.source_system),
-        ("Source schema",        result.source_schema),
-        ("Source tables",        ", ".join(result.source_tables)),
-        ("Target dataset",       result.target_dataset),
-        ("Target table",         result.target_table),
-        ("Field count",          result.field_count),
-        ("PII fields detected",  result.pii_count),
-        ("Partition field",      result.partition_field or "—"),
-        ("Idempotency strategy", result.idempotency_strategy),
-        ("Idempotency key",      result.idempotency_key or "—"),
+    meta = wb.create_sheet("metadata")
+    counts = {"1:1": 0, "1:many": 0, "derived": 0, "constant": 0, "unused": 0}
+    for m in bb.mappings:
+        counts[m.mapping_type] = counts.get(m.mapping_type, 0) + 1
+    meta.append(["Generated", datetime.now(timezone.utc).isoformat()])
+    meta.append(["Session ID", bb.session_id])
+    meta.append(["Source table", bb.source_table_name])
+    meta.append(["Target", f"{bb.target_project}.{bb.target_dataset}"])
+    meta.append(["Total mappings", len(bb.mappings)])
+    for k, v in counts.items():
+        meta.append([k, v])
+    meta.column_dimensions["A"].width = 18
+    meta.column_dimensions["B"].width = 50
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _crc32(data: bytes) -> int:
+    return zlib.crc32(data) & 0xFFFFFFFF
+
+
+def build_sql_zip(bundle: SqlBundle, source_table_name: str) -> bytes:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    files: List[Tuple[str, bytes]] = []
+    seen: dict[str, int] = {}
+    for i, stmt in enumerate(bundle.statements):
+        base = stmt.target_table or f"statement_{i + 1:02d}"
+        seen[base] = seen.get(base, 0) + 1
+        c = seen[base]
+        filename = f"{base}.sql" if c == 1 else f"{base}_{c}.sql"
+        header = (
+            "-- ============================================================\n"
+            f"-- Target: {base}\n"
+            f"-- Source: {source_table_name}\n"
+            f"-- Generated: {today}\n"
+            "-- BigQuery Standard SQL\n"
+            "-- ============================================================\n\n"
+        )
+        files.append((filename, (header + stmt.sql + "\n").encode("utf-8")))
+
+    if bundle.combined_sql:
+        files.append((f"_all_{source_table_name}_{today}.sql", bundle.combined_sql.encode("utf-8")))
+
+    manifest_lines = [
+        f"Source-to-Target Mapping — generated {today}",
+        f"Source: {source_table_name}",
+        f"Project.Dataset: {bundle.project}.{bundle.dataset}",
+        f"Statements: {len(bundle.statements)}",
+        "",
+        "Files:",
     ]
-    for i, (k, v) in enumerate(summary, 3):
-        ws2.cell(row=i, column=1, value=k).font = Font(bold=True, color="64748B")
-        ws2.cell(row=i, column=2, value=str(v)).font = body_font
+    for fname, _ in files[:-1]:
+        manifest_lines.append(f"  - {fname}")
+    if files:
+        manifest_lines.append(f"  - {files[-1][0]}   (combined)")
+    files.append(("README.txt", "\n".join(manifest_lines).encode("utf-8")))
 
-    # Business rules
-    base_row = len(summary) + 5
-    ws2.cell(row=base_row, column=1, value="Business rules").font = Font(bold=True, size=12, color="07111F")
-    for i, rule in enumerate(result.business_rules, 1):
-        ws2.cell(row=base_row + i, column=1, value=f"  {i}. {rule}").font = body_font
+    return _build_zip(files)
 
-    ws2.column_dimensions["A"].width = 24
-    ws2.column_dimensions["B"].width = 80
 
-    # ── Output ───────────────────────────────────────────────────────────
-    out = io.BytesIO()
-    wb.save(out)
-    return out.getvalue()
+def _build_zip(files: List[Tuple[str, bytes]]) -> bytes:
+    local_chunks: List[bytes] = []
+    central_chunks: List[bytes] = []
+    offset = 0
+    for name, data in files:
+        name_bytes = name.encode("utf-8")
+        crc = _crc32(data)
+        size = len(data)
+        local_chunks.append(struct.pack(
+            "<IHHHHHIIIHH",
+            0x04034b50,
+            20, 0, 0, 0, 0,
+            crc, size, size,
+            len(name_bytes), 0,
+        ))
+        local_chunks.append(name_bytes)
+        local_chunks.append(data)
+        central_chunks.append(struct.pack(
+            "<IHHHHHHIIIHHHHHII",
+            0x02014b50,
+            20, 20, 0, 0, 0, 0,
+            crc, size, size,
+            len(name_bytes), 0, 0, 0, 0, 0,
+            offset,
+        ))
+        central_chunks.append(name_bytes)
+        offset += 30 + len(name_bytes) + size
+
+    central = b"".join(central_chunks)
+    eocd = struct.pack(
+        "<IHHHHIIH",
+        0x06054b50,
+        0, 0, len(files), len(files),
+        len(central), offset, 0,
+    )
+    return b"".join(local_chunks) + central + eocd

@@ -26,11 +26,13 @@ class EventKind(str, Enum):
     gate_decided = "gate_decided"
 
     # Session lifecycle
+    session_started = "session_started"
     session_done = "session_done"
     session_failed = "session_failed"
 
     # Progress / heartbeat
     progress = "progress"
+    stage_progress = "stage_progress"
     heartbeat = "heartbeat"
 
 

@@ -1,4 +1,11 @@
-"""Pydantic shared-blackboard for an STM agentic session."""
+"""Pydantic shared-blackboard for an STM agentic session.
+
+Source-first model: one source table (Databricks Unity Catalog table OR uploaded
+data sample) → many candidate target tables in a BigQuery dataset
+(INFORMATION_SCHEMA). The pipeline shortlists relevant target tables, then
+maps each source column to its single best target column with business logic,
+then generates BigQuery MERGE SQL.
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -7,6 +14,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+
+# ── Stage status / gate decision ─────────────────────────────────────────────
 
 class StageStatus(str, Enum):
     idle = "idle"
@@ -18,211 +27,158 @@ class StageStatus(str, Enum):
     failed = "failed"
 
 
-class IntentArtifact(BaseModel):
-    source: Literal["jira", "freetext"]
-    raw_input: str
-    jira_issue_key: Optional[str] = None
-    entity: str = ""
-    action: str = ""
-    is_dimension: bool = False
-    is_fact: bool = False
-    scd_hint: Optional[Literal["type1", "type2", "type3", "none"]] = None
-    filters: List[str] = Field(default_factory=list)
-    grain_hint: Optional[str] = None
-    extracted_keywords: List[str] = Field(default_factory=list)
-    status: StageStatus = StageStatus.idle
-    intent_kind: Literal["new", "enhance_existing"] = "new"
-    baseline_stm_id: Optional[str] = None
-    delta_fields: List[str] = Field(default_factory=list)
-
-
-class Attachment(BaseModel):
-    """File uploaded at session start (CSV, PDF, DOCX, TXT).
-
-    CSV files are schema-inferred and contribute synthetic dialect='csv' nodes
-    to the metadata graph. Other types contribute their text excerpt to
-    intent.raw_input so L1 has full context.
-    """
-    id: str
-    filename: str
-    kind: Literal["csv", "pdf", "docx", "txt"]
-    bytes: int
-    stored_at: str
-    text_excerpt: str = ""
-    csv_schema: Optional[Dict[str, Any]] = None
-    uploaded_at: Optional[datetime] = None
-
-
-class GraphNode(BaseModel):
-    id: str
-    kind: Literal["dialect", "schema", "table", "column", "concept"]
-    label: str
-    dialect: Optional[str] = None
-    data_type: Optional[str] = None
-    nullable: Optional[bool] = None
-    is_pii: Optional[bool] = None
-    profile: Optional[Dict[str, Any]] = None
-
-
-class GraphEdge(BaseModel):
-    src: str
-    dst: str
-    kind: Literal["contains", "fk", "semantic_match", "join_candidate", "concept_link"]
-    confidence: Optional[float] = None
-    evidence: Optional[str] = None
-
-
-class TableScore(BaseModel):
-    """Aggregated relevance score per source table for Gate 1 ranking."""
-    table_id: str          # e.g. "postgres-crm-demo.crm.customers"
-    label: str             # display name
-    dialect: str
-    score: float           # 0..1
-    evidence: List[str] = Field(default_factory=list)
-    column_hits: int = 0
-    row_estimate: Optional[int] = None
-
-
-class MetadataGraph(BaseModel):
-    nodes: List[GraphNode] = Field(default_factory=list)
-    edges: List[GraphEdge] = Field(default_factory=list)
-    sources_probed: List[str] = Field(default_factory=list)
-    coverage_notes: List[str] = Field(default_factory=list)
-    status: StageStatus = StageStatus.idle
-    # Per-profile resolution method: "live" | "dataplex" | "information_schema" | "inferred" | "failed"
-    profile_coverage: Dict[str, str] = Field(default_factory=dict)
-    # Top source tables ranked by intent-keyword match strength + FK density
-    table_scores: List[TableScore] = Field(default_factory=list)
-
-    def find_by_concept(self, concept: str) -> List[GraphNode]:
-        ids = {e.dst for e in self.edges if e.kind == "concept_link" and concept.lower() in (e.evidence or "").lower()}
-        return [n for n in self.nodes if n.id in ids]
-
-    def join_candidates(self, table_id: str) -> List[GraphEdge]:
-        return [e for e in self.edges if e.kind == "join_candidate" and (e.src.startswith(table_id) or e.dst.startswith(table_id))]
-
-    def columns_of(self, table_id: str) -> List[GraphNode]:
-        col_ids = {e.dst for e in self.edges if e.kind == "contains" and e.src == table_id}
-        return [n for n in self.nodes if n.id in col_ids and n.kind == "column"]
-
-    def by_dialect(self, dialect: str) -> List[GraphNode]:
-        return [n for n in self.nodes if n.dialect == dialect and n.kind == "table"]
-
-
-class CandidateMapping(BaseModel):
-    target_field: str
-    target_type: str
-    source_node_ids: List[str] = Field(default_factory=list)
-    source_expression: str = ""
-    rationale: str = ""
-    grain: List[str] = Field(default_factory=list)
-    cardinality: Optional[Literal["1:1", "M:1", "1:M", "M:M"]] = None
-    rule_baseline: bool = False
-    refined_by_llm: bool = False
-    llm_confidence: Optional[float] = None
-    from_baseline: bool = False
-
-
-class CandidateMappings(BaseModel):
-    target_table: str
-    target_dataset: str
-    rows: List[CandidateMapping] = Field(default_factory=list)
-    rule_baseline_summary: Dict[str, Any] = Field(default_factory=dict)
-    status: StageStatus = StageStatus.idle
-
-
-class Transformation(BaseModel):
-    target_field: str
-    kind: Literal["derived", "scd2", "audit", "surrogate_key", "computed", "filter"]
-    logic: str
-    inputs: List[str] = Field(default_factory=list)
-    rationale: str = ""
-
-
-class Transformations(BaseModel):
-    rows: List[Transformation] = Field(default_factory=list)
-    scd_strategy: Optional[Literal["type1", "type2", "type3", "none"]] = None
-    audit_fields: List[str] = Field(default_factory=list)
-    idempotency_key: Optional[str] = None
-    partition_field: Optional[str] = None
-    status: StageStatus = StageStatus.idle
-
-
-class ValidationFinding(BaseModel):
-    severity: Literal["info", "warn", "block"]
-    target_field: Optional[str] = None
-    rule: str
-    message: str
-
-
-class ConfidenceScore(BaseModel):
-    target_field: str
-    llm_score: float = 0.0
-    name_sim_score: float = 0.0
-    type_compat_score: float = 0.0
-    profile_overlap_score: Optional[float] = None
-    fk_evidence_score: float = 0.0
-    final: float = 0.0
-    band: Literal["high", "medium", "low"] = "low"
-
-
-class ValidationReport(BaseModel):
-    scores: List[ConfidenceScore] = Field(default_factory=list)
-    findings: List[ValidationFinding] = Field(default_factory=list)
-    low_confidence_count: int = 0
-    block_count: int = 0
-    overall_band: Literal["high", "medium", "low"] = "high"
-    status: StageStatus = StageStatus.idle
+Stage = Literal["L1", "L2", "L3", "L4", "done", "failed"]
+GateName = Literal["gate1_shortlist", "gate2_mapping"]
 
 
 class GateDecision(BaseModel):
-    name: Literal["gate1_metadata", "gate2_validation"]
+    name: GateName
     decision: Literal["pending", "approved", "rejected", "refine"] = "pending"
     reviewer: Optional[str] = None
     notes: Optional[str] = None
-    refine_target_stage: Optional[Literal["L1", "L2", "L3", "L4", "L5"]] = None
+    refine_target_stage: Optional[Literal["L1", "L2", "L3"]] = None
     refine_feedback: Optional[str] = None
     decided_at: Optional[datetime] = None
 
 
-class BqTargetTable(BaseModel):
-    """A single table discovered in the target BigQuery dataset."""
-    name: str
-    columns: List[Dict[str, Any]] = Field(default_factory=list)
-    row_count: Optional[int] = None
-    last_modified: Optional[str] = None
+# ── Attachments (file upload provenance) ─────────────────────────────────────
 
+class Attachment(BaseModel):
+    """File uploaded at session start (xlsx, csv, json, txt).
 
-class BqTargetGraph(BaseModel):
-    """Crawled summary of the target BigQuery dataset.
-
-    Populated by L2 alongside MetadataGraph when dialect_target == "bigquery".
-    L3/L4 prompts include this so generated mappings/transformations are
-    grounded in the actual target schema.
+    The schemas agent parses the file via `core.stm.schemas.upload_parser` and
+    promotes the inferred tables into `source_table` / `target_schema` depending
+    on which slot the upload targeted.
     """
-    project_id: str = ""
-    dataset: str = ""
-    tables: List[BqTargetTable] = Field(default_factory=list)
-    status: StageStatus = StageStatus.idle
-    fetched_at: Optional[datetime] = None
+    id: str
+    filename: str
+    kind: Literal["xlsx", "csv", "json", "txt"]
+    bytes: int
+    stored_at: str
+    role: Literal["source", "target"]
+    uploaded_at: Optional[datetime] = None
+    diag: Optional[Dict[str, Any]] = None  # parser strategy + stats
 
+
+# ── Schema models (L1 output) ────────────────────────────────────────────────
+
+class ColumnRef(BaseModel):
+    name: str
+    type: Optional[str] = None          # BQ-style type ideally (STRING, INT64, …) or raw dialect type
+    description: Optional[str] = None
+
+
+class SourceTable(BaseModel):
+    """A single source table — name + ordered list of columns with types."""
+    name: str
+    columns: List[ColumnRef] = Field(default_factory=list)
+    # Provenance: where these columns came from
+    origin: Literal["databricks_unity", "upload", "manual"] = "upload"
+    catalog: Optional[str] = None   # databricks catalog
+    schema_name: Optional[str] = None  # databricks schema
+    comment: Optional[str] = None
+
+
+class TargetSchema(BaseModel):
+    """The target BigQuery dataset's INFORMATION_SCHEMA dump — many tables."""
+    project: str
+    dataset: str
+    tables: List[SourceTable] = Field(default_factory=list)
+    fetched_at: Optional[datetime] = None
+    origin: Literal["bigquery_live", "upload"] = "bigquery_live"
+
+
+# ── Shortlist (L2 output) ────────────────────────────────────────────────────
+
+class ShortlistEntry(BaseModel):
+    """One candidate target table — picked by L2 as receiving data from source."""
+    table: str
+    reason: str                     # one-liner role description
+    match_count: int = 0            # number of source columns with a real home here
+    evidence: List[str] = Field(default_factory=list)  # ["source.col -> target.col (1:1)", ...]
+    picked: bool = True             # reviewer can uncheck at Gate 1
+
+
+class Shortlist(BaseModel):
+    rows: List[ShortlistEntry] = Field(default_factory=list)
+    status: StageStatus = StageStatus.idle
+
+
+# ── Mapping rows (L3 output) ─────────────────────────────────────────────────
+
+MappingType = Literal["1:1", "1:many", "derived", "constant", "unused"]
+
+
+class MappingRow(BaseModel):
+    """One row per source column — its single best landing in the target schema."""
+    source_table: str
+    source_column: str
+    target_table: str = ""           # "" when mapping_type == "unused"
+    target_column: str = ""          # "" when mapping_type == "unused"
+    mapping_type: MappingType
+    business_logic: str = ""         # ≤25 words — what the engineer needs to do
+    rationale: Optional[str] = None  # optional extra context
+    edited_by_reviewer: bool = False
+    failed: bool = False             # set when the LLM batch failed for this column
+
+
+# ── SQL output (L4 output) ───────────────────────────────────────────────────
+
+class SqlStatement(BaseModel):
+    target_table: str
+    sql: str
+    header_comment: str = ""
+
+
+class SqlBundle(BaseModel):
+    project: str
+    dataset: str
+    statements: List[SqlStatement] = Field(default_factory=list)
+    combined_sql: str = ""
+    generated_at: Optional[datetime] = None
+    status: StageStatus = StageStatus.idle
+
+
+# ── Top-level blackboard ─────────────────────────────────────────────────────
 
 class StmBlackboard(BaseModel):
+    """Shared session state across the 4-stage source-first pipeline."""
     session_id: str
-    target_table: str
-    target_dataset: str
-    dialect_target: Literal["bigquery"]
-    selected_source_profiles: List[str] = Field(default_factory=list)
-    intent: IntentArtifact
-    metadata_graph: MetadataGraph
-    candidate_mappings: CandidateMappings
-    transformations: Transformations
-    validation: ValidationReport
-    stm_result: Optional[Dict[str, Any]] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    # User intent (free-form, replaces the old IntentArtifact)
+    business_context: str = ""
+
+    # L1 — schemas
+    source_table: Optional[SourceTable] = None
+    target_schema: Optional[TargetSchema] = None
+
+    # L2 — shortlist
+    shortlist: Optional[Shortlist] = None
+
+    # L3 — mappings (source-first; one row per source column)
+    mappings: List[MappingRow] = Field(default_factory=list)
+    mapping_status: StageStatus = StageStatus.idle
+
+    # L4 — SQL
+    sql_bundle: Optional[SqlBundle] = None
+
+    # Gates + attachments + flow control
     gates: Dict[str, GateDecision] = Field(default_factory=dict)
-    current_stage: Literal["L1", "L2", "L3", "L4", "L5", "L6", "done", "failed"] = "L1"
-    refine_feedback_pending: Dict[str, str] = Field(default_factory=dict)
     attachments: List[Attachment] = Field(default_factory=list)
-    target_graph: Optional[BqTargetGraph] = None
-    materialized: Optional[Dict[str, Any]] = None
-    baseline_stm_id: Optional[str] = None
+    current_stage: Stage = "L1"
+    refine_feedback_pending: Dict[str, str] = Field(default_factory=dict)
+
+    # Convenience accessors — used by exporter / persistence to denormalise
+    @property
+    def target_project(self) -> str:
+        return (self.target_schema.project if self.target_schema else "") or ""
+
+    @property
+    def target_dataset(self) -> str:
+        return (self.target_schema.dataset if self.target_schema else "") or ""
+
+    @property
+    def source_table_name(self) -> str:
+        return (self.source_table.name if self.source_table else "") or ""

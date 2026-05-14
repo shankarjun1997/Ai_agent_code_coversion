@@ -55,6 +55,28 @@ class BQClient:
         except Exception as exc:
             return [{"error": str(exc)}]
 
+    def list_columns_in_dataset(self, dataset: str) -> List[Dict]:
+        """All columns across every table in a dataset — one INFORMATION_SCHEMA query.
+
+        Each row: {table_name, column_name, data_type, is_nullable, description}.
+        Raises on failure — callers decide whether to swallow or surface.
+        """
+        query = f"""
+            SELECT
+                c.table_name,
+                c.column_name,
+                c.data_type,
+                c.is_nullable,
+                f.description
+            FROM `{self.project_id}.{dataset}.INFORMATION_SCHEMA.COLUMNS` AS c
+            LEFT JOIN `{self.project_id}.{dataset}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS` AS f
+              ON c.table_name = f.table_name
+             AND c.column_name = f.column_name
+             AND f.field_path = c.column_name
+            ORDER BY c.table_name, c.ordinal_position
+        """
+        return [dict(r) for r in self.client.query(query).result()]
+
     def get_table_partitioning(self, dataset: str, table: str) -> Optional[Dict]:
         """Return partitioning/clustering info for a table."""
         query = f"""
