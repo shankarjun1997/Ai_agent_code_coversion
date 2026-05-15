@@ -2,12 +2,16 @@
 from __future__ import annotations
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from sqlalchemy import select, update
 
 from core.db.platform import get_platform_session_factory
 from core.models.batch import Batch
+
+BatchStatus = Literal["pending", "running", "done", "failed"]
+
+_factory = get_platform_session_factory()
 
 
 async def create_batch(
@@ -18,10 +22,9 @@ async def create_batch(
     business_context: Optional[str],
     session_count: int,
 ) -> str:
-    factory = get_platform_session_factory()
     now = datetime.utcnow()
     bid = str(uuid.uuid4())
-    async with factory() as session:
+    async with _factory() as session:
         session.add(Batch(
             id=bid,
             tenant_id=tenant_id,
@@ -39,8 +42,7 @@ async def create_batch(
 
 
 async def get_batch(batch_id: str) -> Dict[str, Any]:
-    factory = get_platform_session_factory()
-    async with factory() as session:
+    async with _factory() as session:
         b = (await session.execute(
             select(Batch).where(Batch.id == batch_id)
         )).scalar_one_or_none()
@@ -61,8 +63,7 @@ async def get_batch(batch_id: str) -> Dict[str, Any]:
 
 
 async def list_batches(*, tenant_id: str) -> List[Dict[str, Any]]:
-    factory = get_platform_session_factory()
-    async with factory() as session:
+    async with _factory() as session:
         rows = (await session.execute(
             select(Batch)
             .where(Batch.tenant_id == tenant_id)
@@ -83,15 +84,16 @@ async def list_batches(*, tenant_id: str) -> List[Dict[str, Any]]:
 async def update_batch_status(
     batch_id: str,
     *,
-    status: str,
+    status: BatchStatus,
     done_count: Optional[int] = None,
 ) -> None:
-    factory = get_platform_session_factory()
     vals: Dict[str, Any] = {"status": status, "updated_at": datetime.utcnow()}
     if done_count is not None:
         vals["done_count"] = done_count
-    async with factory() as session:
-        await session.execute(
+    async with _factory() as session:
+        result = await session.execute(
             update(Batch).where(Batch.id == batch_id).values(**vals)
         )
         await session.commit()
+    if result.rowcount == 0:
+        raise KeyError(f"Batch {batch_id} not found")
