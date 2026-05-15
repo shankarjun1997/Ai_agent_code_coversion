@@ -9,8 +9,9 @@ def test_roundtrip(monkeypatch):
     data = decrypt(blob)
     assert data == {"user": "alice", "password": "s3cret"}
 
-def test_missing_key_raises(monkeypatch):
-    import pytest
+def test_missing_key_falls_back_to_plain(monkeypatch):
     monkeypatch.delenv("STM_PROFILE_ENCRYPTION_KEY", raising=False)
-    with pytest.raises(RuntimeError):
-        encrypt({"x": 1})
+    blob = encrypt({"x": 1})
+    # Without a key, encrypt falls back to reversible base64 (dev mode).
+    assert blob.startswith(b"PLAIN:")
+    assert decrypt(blob) == {"x": 1}
