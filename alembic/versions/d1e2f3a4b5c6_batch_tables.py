@@ -18,7 +18,7 @@ def _col_exists(conn, table: str, col: str) -> bool:
     result = conn.execute(
         sa.text(
             "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name=:t AND column_name=:c"
+            "WHERE table_schema='public' AND table_name=:t AND column_name=:c"
         ),
         {"t": table, "c": col},
     )
@@ -29,7 +29,7 @@ def _table_exists(conn, table: str) -> bool:
     result = conn.execute(
         sa.text(
             "SELECT 1 FROM information_schema.tables "
-            "WHERE table_name=:t"
+            "WHERE table_schema='public' AND table_name=:t"
         ),
         {"t": table},
     )
@@ -50,8 +50,8 @@ def upgrade() -> None:
             sa.Column("status",             sa.String(16),  nullable=False, server_default="pending"),
             sa.Column("session_count",      sa.Integer(),   nullable=False, server_default="0"),
             sa.Column("done_count",         sa.Integer(),   nullable=False, server_default="0"),
-            sa.Column("created_at",         sa.DateTime(),  nullable=False),
-            sa.Column("updated_at",         sa.DateTime(),  nullable=False),
+            sa.Column("created_at",         sa.DateTime(),  nullable=False, server_default=sa.func.now()),
+            sa.Column("updated_at",         sa.DateTime(),  nullable=False, server_default=sa.func.now()),
         )
 
     for col_name, col_type in [
