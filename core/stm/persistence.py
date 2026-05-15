@@ -38,7 +38,7 @@ def _build_schema(meta: MetaData) -> None:
         Column("session_id", String(36), primary_key=True),
         Column("status", String(32), nullable=False),
         Column("current_stage", String(16), nullable=False),
-        Column("source_table_name", String(128), nullable=True),
+        Column("source_table_name", String(255), nullable=True),
         Column("target_project", String(128), nullable=True),
         Column("target_dataset", String(128), nullable=True),
         Column("business_context", Text(), nullable=True),
@@ -46,6 +46,11 @@ def _build_schema(meta: MetaData) -> None:
         Column("created_at", DateTime(), nullable=False),
         Column("updated_at", DateTime(), nullable=False),
         Column("created_by", String(128), nullable=True),
+        # Batch linkage columns (added by d1e2f3a4b5c6 migration)
+        Column("batch_id", String(36), nullable=True),
+        Column("catalog_source_id", String(36), nullable=True),
+        Column("catalog_target_id", String(36), nullable=True),
+        Column("catalog_source_table_id", String(36), nullable=True),
     )
     Table(
         "stm_stage_events", meta,
@@ -156,6 +161,10 @@ def _create_session_sync(bb: StmBlackboard) -> None:
             blackboard_json=bb.model_dump_json(),
             created_at=bb.created_at or now,
             updated_at=now,
+            batch_id=bb.batch_id,
+            catalog_source_id=bb.catalog_source_id,
+            catalog_target_id=bb.catalog_target_id,
+            catalog_source_table_id=bb.catalog_source_table_id,
         ))
 
 

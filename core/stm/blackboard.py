@@ -147,6 +147,15 @@ class StmBlackboard(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
+    # Batch linkage (populated when session is part of a batch run)
+    batch_id: Optional[str] = None
+    catalog_source_id: Optional[str] = None
+    catalog_target_id: Optional[str] = None
+    catalog_source_table_id: Optional[str] = None
+    # Denormalised table name — set by batch orchestrator before L1 runs so the
+    # DB row is immediately readable; also used as the persistence column value.
+    source_table_name_hint: Optional[str] = None
+
     # User intent (free-form, replaces the old IntentArtifact)
     business_context: str = ""
 
@@ -181,4 +190,6 @@ class StmBlackboard(BaseModel):
 
     @property
     def source_table_name(self) -> str:
-        return (self.source_table.name if self.source_table else "") or ""
+        if self.source_table:
+            return self.source_table.name or ""
+        return self.source_table_name_hint or ""
