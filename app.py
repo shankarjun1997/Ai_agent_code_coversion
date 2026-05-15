@@ -26,6 +26,7 @@ from routers.gates import router as gates_router
 from routers.discovery import router as discovery_router
 from routers.stm_sessions import router as stm_sessions_router
 from routers.stm_memory import router as stm_memory_router
+from routers.catalogs import router as catalogs_router
 
 
 def decrypt_db_url(encrypted: str) -> str:
@@ -117,6 +118,7 @@ app.include_router(gates_router)
 app.include_router(discovery_router)
 app.include_router(stm_sessions_router)
 app.include_router(stm_memory_router)
+app.include_router(catalogs_router)
 
 
 @app.get("/health")
