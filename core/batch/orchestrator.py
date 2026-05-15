@@ -45,11 +45,7 @@ async def _create_and_run_session(
         source_table_name_hint=table["table_name"],
     )
 
-    try:
-        await start_session(bb, business_context=business_context)
-    except Exception as exc:
-        logger.error("Session %s (table=%s) failed to start: %s", session_id, table.get("table_name"), exc)
-
+    await start_session(bb, business_context=business_context)
     return session_id
 
 
@@ -82,17 +78,26 @@ async def run_batch(batch_id: str) -> None:
     await update_batch_status(batch_id, status="running", done_count=0)
 
     sem = asyncio.Semaphore(_MAX_PARALLEL)
+    lock = asyncio.Lock()
     done = 0
+    failed = 0
 
     async def _bounded(table: Dict[str, Any]) -> None:
-        nonlocal done
+        nonlocal done, failed
         async with sem:
-            await _create_and_run_session(
-                batch_id, tenant_id, catalog_source_id, catalog_target_id,
-                business_context, table,
-            )
-            done += 1
-            await update_batch_status(batch_id, status="running", done_count=done)
+            try:
+                await _create_and_run_session(
+                    batch_id, tenant_id, catalog_source_id, catalog_target_id,
+                    business_context, table,
+                )
+                async with lock:
+                    done += 1
+                    await update_batch_status(batch_id, status="running", done_count=done)
+            except Exception as exc:
+                logger.error("Batch %s table %s failed: %s", batch_id, table.get("table_name"), exc)
+                async with lock:
+                    failed += 1
 
-    await asyncio.gather(*[_bounded(t) for t in tables])
-    await update_batch_status(batch_id, status="done", done_count=done)
+    await asyncio.gather(*[_bounded(t) for t in tables], return_exceptions=True)
+    final_status = "done" if failed == 0 else "partial"
+    await update_batch_status(batch_id, status=final_status, done_count=done)

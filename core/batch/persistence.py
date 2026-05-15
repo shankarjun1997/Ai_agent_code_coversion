@@ -9,7 +9,7 @@ from sqlalchemy import select, update
 from core.db.platform import get_platform_session_factory
 from core.models.batch import Batch
 
-BatchStatus = Literal["pending", "running", "done", "failed"]
+BatchStatus = Literal["pending", "running", "done", "failed", "partial"]
 
 _factory = get_platform_session_factory()
 
