@@ -45,3 +45,31 @@ def test_strategy_1b_string_agg_schema_dump():
     assert by_name["billing_invoice"].column_count == 24
     assert by_name["customer_account_profile"].column_count == 24
     assert by_name["network_outage_event"].column_count == 23
+
+
+def test_strategy_2_workbook_per_table(tmp_path):
+    """Synthetic workbook: 2 sheets, each a table with column rows."""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    s1 = wb.active
+    s1.title = "orders"
+    s1.append(["column_name", "data_type", "description"])
+    s1.append(["order_id", "STRING", "PK"])
+    s1.append(["amount", "FLOAT64", "USD"])
+    s2 = wb.create_sheet("customers")
+    s2.append(["column_name", "data_type", "description"])
+    s2.append(["customer_id", "STRING", "PK"])
+    s2.append(["email", "STRING", None])
+    s2.append(["created_at", "TIMESTAMP", None])
+
+    path = tmp_path / "workbook.xlsx"
+    wb.save(path)
+
+    result = parse_schema_file(path)
+    assert result.strategy == "workbook_per_table"
+    by_name = {t.table_name: t for t in result.tables}
+    assert set(by_name.keys()) == {"orders", "customers"}
+    assert by_name["orders"].column_count == 2
+    assert by_name["customers"].column_count == 3
+    assert by_name["orders"].columns[0]["name"] == "order_id"
+    assert by_name["orders"].columns[0]["type"] == "STRING"

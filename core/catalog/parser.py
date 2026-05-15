@@ -296,6 +296,47 @@ def _try_strategy_1(sheets: List[Dict[str, Any]]) -> Optional[List[ParsedTable]]
     return None
 
 
+# ── Strategy 2: workbook, one sheet per table ───────────────────────────────
+
+def _try_strategy_2(sheets: List[Dict[str, Any]]) -> Optional[List[ParsedTable]]:
+    """Each sheet is a table; the sheet's first row is the column-level header.
+
+    Inside a sheet, header must include a column_name-style header
+    (no table_name header — that would belong to strategy 1).
+    """
+    tables: List[ParsedTable] = []
+    for sheet in sheets:
+        rows = sheet["rows2D"]
+        if len(rows) < 2:
+            continue
+        headers = list(rows[0])
+        # If table_name header is present, this is strategy 1 territory; skip.
+        if _match_key(headers, TABLE_KEYS) != -1:
+            continue
+        ci = _match_key(headers, COLUMN_KEYS)
+        if ci == -1:
+            continue
+        ty = _match_key(headers, TYPE_KEYS)
+        ds = _match_key(headers, DESC_KEYS)
+
+        cols: List[ParsedColumn] = []
+        for ord_i, r in enumerate(rows[1:]):
+            if ci >= len(r):
+                continue
+            name = r[ci]
+            if not name:
+                continue
+            cols.append({
+                "name": str(name).strip(),
+                "type": str(r[ty]).strip() if ty != -1 and ty < len(r) and r[ty] else None,
+                "description": str(r[ds]).strip() if ds != -1 and ds < len(r) and r[ds] else None,
+                "ordinal": ord_i,
+            })
+        if cols:
+            tables.append(ParsedTable(table_name=sheet["name"], columns=cols))
+    return tables or None
+
+
 # ── Main entrypoint ─────────────────────────────────────────────────────────
 
 def parse_schema_file(path: Path) -> ParsedSchema:
@@ -318,7 +359,10 @@ def parse_schema_file(path: Path) -> ParsedSchema:
     if s1:
         return ParsedSchema(tables=s1, strategy="schema_dump")
 
+    s2 = _try_strategy_2(sheets)
+    if s2:
+        return ParsedSchema(tables=s2, strategy="workbook_per_table")
+
     raise ParserError(
-        f"No strategy matched {path.name}. Strategy 2 "
-        f"(workbook-per-table) is added in a later task."
+        f"No strategy matched {path.name}. Tried: data_sample, schema_dump, workbook_per_table."
     )
