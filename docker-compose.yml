@@ -94,7 +94,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "php", "-r", "$ctx=stream_context_create(['http'=>['timeout'=>3]]);$r=@file_get_contents('http://127.0.0.1:8080/',false,$ctx);exit($r===false?1:0);"]
+      test: ["CMD-SHELL", "php -r \"exit(@file_get_contents('http://127.0.0.1:8080/') === false ? 1 : 0);\""]
       interval: 30s
       timeout: 10s
       retries: 3
