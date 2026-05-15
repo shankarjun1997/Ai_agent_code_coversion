@@ -74,10 +74,12 @@ async def _recall_memory(
         params["lim"] = limit
 
         engine = create_async_engine(db_url, echo=False)
-        async with engine.connect() as conn:
-            result = await conn.execute(query, params)
-            rows = result.fetchall()
-        await engine.dispose()
+        try:
+            async with engine.connect() as conn:
+                result = await conn.execute(query, params)
+                rows = result.fetchall()
+        finally:
+            await engine.dispose()
 
         return [
             {
