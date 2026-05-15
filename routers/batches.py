@@ -48,6 +48,7 @@ async def submit_batch(req: Request, body: BatchIn) -> dict:
         session_count=len(tables),
     )
 
+    # Single-worker uvicorn assumed (see CLAUDE.md — multi-worker deferred)
     asyncio.create_task(run_batch(batch_id))
 
     return {"batch_id": batch_id, "session_count": len(tables), "status": "pending"}
@@ -60,11 +61,14 @@ async def list_batches_endpoint(req: Request) -> dict:
 
 
 @router.get("/{batch_id}")
-async def get_batch_endpoint(batch_id: str) -> dict:
+async def get_batch_endpoint(batch_id: str, req: Request) -> dict:
     try:
-        return await get_batch(batch_id)
+        batch = await get_batch(batch_id)
     except KeyError:
         raise HTTPException(404, f"Batch {batch_id} not found")
+    if batch["tenant_id"] != _tenant_id(req):
+        raise HTTPException(404, f"Batch {batch_id} not found")
+    return batch
 
 
 @router.get("/{batch_id}/events")
@@ -73,11 +77,16 @@ async def batch_events(batch_id: str, req: Request):
     from core.db.platform import get_platform_session_factory
     from sqlalchemy import text
 
+    tenant = _tenant_id(req)
+
     async def generate():
         factory = get_platform_session_factory()
         seen: set = set()
         while True:
-            if await req.is_disconnected():
+            try:
+                if await req.is_disconnected():
+                    break
+            except Exception:
                 break
             try:
                 async with factory() as db:
@@ -86,16 +95,19 @@ async def batch_events(batch_id: str, req: Request):
                             SELECT e.event_id, e.session_id, e.event_kind, e.artifact_json, e.message, e.created_at
                             FROM stm_stage_events e
                             JOIN stm_sessions s ON s.session_id = e.session_id
-                            WHERE s.batch_id = :bid
+                            WHERE s.batch_id = :bid AND s.tenant_id = :tid
                             ORDER BY e.created_at ASC
                         """),
-                        {"bid": batch_id},
+                        {"bid": batch_id, "tid": tenant},
                     )
                     for row in rows:
                         eid = row[0]
                         if eid not in seen:
                             seen.add(eid)
-                            payload = json.loads(row[3]) if row[3] else {}
+                            try:
+                                payload = json.loads(row[3]) if row[3] else {}
+                            except (json.JSONDecodeError, TypeError):
+                                payload = {}
                             if row[4]:
                                 payload["message"] = row[4]
                             data = json.dumps({
