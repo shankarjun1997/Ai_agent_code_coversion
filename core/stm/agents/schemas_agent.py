@@ -36,26 +36,161 @@ class SchemasAgent(StmAgent):
         bb = ctx.blackboard
         updates: Dict[str, Any] = {}
 
-        source_table = bb.source_table
+        # Fast path: batch sessions pre-populate catalog IDs — load both sides
+        # from the catalog DB without hitting Databricks/BQ live APIs.
+        if (
+            bb.source_table is None or bb.target_schema is None
+        ) and bb.catalog_source_id and bb.catalog_target_id:
+            src, tgt = await self._resolve_from_catalog(bb)
+            if src is not None and bb.source_table is None:
+                updates["source_table"] = src
+            if tgt is not None and bb.target_schema is None:
+                updates["target_schema"] = tgt
+            # Re-read from updates so the checks below work correctly.
+            source_table = updates.get("source_table") or bb.source_table
+            target_schema = updates.get("target_schema") or bb.target_schema
+        else:
+            source_table = bb.source_table
+            target_schema = bb.target_schema
+
         if source_table is None:
             source_table = await self._resolve_source(ctx)
+            if source_table is not None:
+                updates["source_table"] = source_table
 
-        target_schema = bb.target_schema
         if target_schema is None:
             target_schema = await self._resolve_target(ctx)
+            if target_schema is not None:
+                updates["target_schema"] = target_schema
 
-        if source_table is None and target_schema is None:
+        # Final resolution check — merge updates with existing blackboard state.
+        resolved_source = updates.get("source_table") or bb.source_table
+        resolved_target = updates.get("target_schema") or bb.target_schema
+
+        if resolved_source is None and resolved_target is None:
             return BlackboardDelta.failure(
                 "No source or target provided — upload files or set databricks/bq config"
             )
-        if source_table is None:
+        if resolved_source is None:
             return BlackboardDelta.failure("Source table not provided")
-        if target_schema is None:
+        if resolved_target is None:
             return BlackboardDelta.failure("Target schema not provided")
 
-        updates["source_table"] = source_table
-        updates["target_schema"] = target_schema
+        updates["source_table"] = resolved_source
+        updates["target_schema"] = resolved_target
         return BlackboardDelta(updates=updates)
+
+    # ── catalog fast path (batch sessions) ──────────────────────────────────
+
+    async def _resolve_from_catalog(
+        self, bb
+    ) -> tuple[Optional[SourceTable], Optional[TargetSchema]]:
+        """Load source + target schemas from the catalog DB.
+
+        Used for batch sessions where the batch orchestrator pre-populates
+        catalog_source_id, catalog_target_id, and catalog_source_table_id on
+        the blackboard. Falls through (returns None) if a catalog entry is
+        missing or the requested table is not found.
+        """
+        from core.catalog.persistence import load_source_catalog, load_target_catalog
+
+        src_result: Optional[SourceTable] = None
+        tgt_result: Optional[TargetSchema] = None
+
+        # --- source side ---
+        try:
+            src_catalog = await load_source_catalog(bb.catalog_source_id)
+            table_id = bb.catalog_source_table_id
+            src_row = next(
+                (t for t in src_catalog.get("tables", []) if t["id"] == table_id),
+                None,
+            )
+            if src_row is None and bb.source_table_name_hint:
+                # Fallback: match by table name if ID lookup misses.
+                src_row = next(
+                    (
+                        t for t in src_catalog.get("tables", [])
+                        if t["table_name"] == bb.source_table_name_hint
+                    ),
+                    None,
+                )
+            if src_row is not None:
+                raw_cols = src_row.get("columns") or []
+                columns = [
+                    ColumnRef(
+                        name=c.get("name") or c.get("column_name", ""),
+                        type=c.get("type") or c.get("data_type"),
+                        description=c.get("description") or c.get("comment"),
+                    )
+                    for c in raw_cols
+                ]
+                src_result = SourceTable(
+                    name=src_row["table_name"],
+                    columns=columns,
+                    origin="upload",
+                    schema_name=src_row.get("schema_name"),
+                )
+                logger.info(
+                    "schemas_agent: loaded source %s from catalog (id=%s, %d cols)",
+                    src_row["table_name"], bb.catalog_source_id, len(columns),
+                )
+            else:
+                logger.warning(
+                    "schemas_agent: catalog_source_table_id=%s not found in catalog %s — "
+                    "will fall through to live fetch",
+                    table_id, bb.catalog_source_id,
+                )
+        except KeyError:
+            logger.warning(
+                "schemas_agent: source catalog %s not found — falling through",
+                bb.catalog_source_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "schemas_agent: catalog source load failed (%s) — falling through", exc
+            )
+
+        # --- target side ---
+        try:
+            tgt_catalog = await load_target_catalog(bb.catalog_target_id)
+            raw_tables = tgt_catalog.get("tables", [])
+            tgt_tables = [
+                SourceTable(
+                    name=t["table_name"],
+                    columns=[
+                        ColumnRef(
+                            name=c.get("name") or c.get("column_name", ""),
+                            type=c.get("type") or c.get("data_type"),
+                            description=c.get("description"),
+                        )
+                        for c in (t.get("columns") or [])
+                    ],
+                    origin="upload",
+                )
+                for t in raw_tables
+            ]
+            tgt_result = TargetSchema(
+                project=tgt_catalog.get("project", ""),
+                dataset=tgt_catalog.get("dataset", ""),
+                tables=tgt_tables,
+                fetched_at=datetime.now(timezone.utc),
+                origin="upload",
+            )
+            logger.info(
+                "schemas_agent: loaded target catalog %s (%d tables)",
+                bb.catalog_target_id, len(tgt_tables),
+            )
+        except KeyError:
+            logger.warning(
+                "schemas_agent: target catalog %s not found — falling through",
+                bb.catalog_target_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "schemas_agent: catalog target load failed (%s) — falling through", exc
+            )
+
+        return src_result, tgt_result
 
     # ── source side ─────────────────────────────────────────────────────────
 
