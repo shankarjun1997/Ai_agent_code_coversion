@@ -1,0 +1,16 @@
+{
+    "name": "sqlgen/ui",
+    "description": "SQL-Gen mapping UI — ZealPHP",
+    "require": {
+        "php": "^8.3",
+        "sibidharan/zealphp": "^0.2.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "SqlGen\\": "src/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true
+    }
+}

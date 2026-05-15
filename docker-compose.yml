@@ -78,7 +78,7 @@ services:
     networks:
       - sqlgen-net
 
-  # ── PHP + Nginx — dashboard UI ───────────────────────────────────────────
+  # ── ZealPHP (OpenSwoole) — dashboard UI ─────────────────────────────────
   ui:
     build:
       context: .
@@ -87,14 +87,18 @@ services:
     restart: unless-stopped
     environment:
       - API_BASE_URL=http://api:8000
-    volumes:
-      - output_data:/app/output:ro   # read-only — UI only reads state
-      - ./ui:/var/www/html           # live-reload for UI development
+      - API_BASE_URL_EXTERNAL=http://localhost:8000
     ports:
-      - "8080:80"
+      - "8080:8080"
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "-r", "$ctx=stream_context_create(['http'=>['timeout'=>3]]);$r=@file_get_contents('http://127.0.0.1:8080/',false,$ctx);exit($r===false?1:0);"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - sqlgen-net
 

@@ -67,6 +67,9 @@ node_modules/
 .next/
 .cache/
 
+# PHP vendor (ZealPHP UI)
+ui/vendor/
+
 # Misc Claude/AI tooling
 .claude-mem/
 .cron/
